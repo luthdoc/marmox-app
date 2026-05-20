@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(grill-me)",
+      "PowerShell(New-Item *)",
+      "PowerShell(py *)"
+    ]
+  }
+}
