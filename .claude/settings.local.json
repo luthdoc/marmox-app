@@ -3,7 +3,8 @@
     "allow": [
       "Skill(grill-me)",
       "PowerShell(New-Item *)",
-      "PowerShell(py *)"
+      "PowerShell(py *)",
+      "PowerShell(winget install *)"
     ]
   }
 }
