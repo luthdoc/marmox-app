@@ -51,6 +51,42 @@ npm run dev
 # disponível em http://localhost:3000
 ```
 
-## Variáveis de Ambiente
+## Environment Setup
 
-Veja `backend/.env.example` para a lista completa de variáveis necessárias.
+Cada app possui um arquivo `.env.example` com todas as variáveis necessárias documentadas.
+
+### Backend
+
+```bash
+cd backend
+cp .env.example .env
+# Edite .env com suas credenciais reais
+```
+
+Variáveis necessárias (ver `backend/.env.example`):
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `SUPABASE_URL` | Sim | URL do projeto Supabase |
+| `SUPABASE_SERVICE_KEY` | Sim | Chave de serviço do Supabase |
+| `ANTHROPIC_API_KEY` | Sim | Chave da API Anthropic (Claude) |
+| `ZAPI_INSTANCE_ID` | Sim | ID da instância Z-API |
+| `ZAPI_TOKEN` | Sim | Token da instância Z-API |
+| `APP_ENV` | Não | `development` ou `production` (padrão: `development`) |
+| `LOG_LEVEL` | Não | Nível de log (padrão: `INFO`) |
+
+### Frontend
+
+```bash
+cd frontend
+cp .env.example .env.local
+# Edite .env.local com suas credenciais reais
+```
+
+Variáveis necessárias (ver `frontend/.env.example`):
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Sim | URL do projeto Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sim | Chave anon do Supabase |
+| `NEXT_PUBLIC_APP_ENV` | Não | `development` ou `production` (padrão: `development`) |
