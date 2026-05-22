@@ -15,11 +15,6 @@ description: >
 
 Você é responsável por implementar uma Story completa. O processo é determinístico: TDD por task, CI gate entre tasks, self-review antes de fechar. **Nenhuma exceção à ordem.**
 
-Leia os protocolos de referência antes de começar:
-- `references/xp-tdd-protocol.md` — regras do ciclo TDD
-- `references/xp-refactoring.md` — gatilhos e restrições de refactoring
-- `references/xp-ci-gate.md` — regras do CI gate entre tasks
-
 ---
 
 ## Pré-condições
@@ -77,7 +72,7 @@ Antes de qualquer linha de código de produção:
 ### 2. GREEN — Implemente o mínimo necessário
 
 - Escreva o código mínimo para fazer o teste passar
-- Nada além do que o AC exige — sem "já que estou aqui" (Article IV: No Invention)
+- Nada além do que o AC exige — sem "já que estou aqui". Qualquer código sem AC correspondente é invenção e deve ser removido.
 - Execute o teste e confirme que **apenas ele** passa (sem regressões)
 
 ### 3. REFACTOR — Limpe antes de marcar [x]
@@ -126,7 +121,14 @@ A saída do CI deve ser **copiada verbatim** para o Change Log — não estimada
 3. Re-execute o CI completo
 4. Só marque [x] e avance quando **tudo** passar
 
-Se o projeto não possuir nenhum runner de testes configurado (sem `pytest`, sem `npm test`), registre no Change Log: `"CI gate não executado — sem runner configurado"` e registre como tech debt. **Isso não se aplica quando o runner existe mas o comando usado estava errado — nesse caso, corrija o comando.**
+Se o runner de testes não estiver configurado em um projeto que tem código de produção: **configurar o runner é a task zero desta story** — antes de qualquer implementação. Não é tech debt adiável; é pré-condição do CI gate.
+
+- Backend (Python): `pytest` instalado via `requirements.txt`. Nunca pule.
+- Frontend (Next.js): instale e configure Vitest antes de avançar. Nunca pule.
+
+Se o comando de teste existir mas estiver errado (script ausente no `package.json`, path incorreto): corrija o comando. Nunca registre como tech debt o que é erro de configuração.
+
+**Única isenção real**: arquivos puramente de configuração sem lógica de negócio (`tailwind.config`, `next.config.js`, `tsconfig.json`, schemas gerados) e tipos TypeScript puros — esses são isentos da proporção 1:1 e não exigem testes.
 
 ### 5. Marque a task [x] e avance para a próxima
 
@@ -193,7 +195,7 @@ Após a self-review, execute o CI completo (não `test:fast`):
 npm run lint && npm run typecheck && npm test
 ```
 
-Article V: CI completo ao final de toda story, independente dos CI gates intermediários.
+**Regra:** CI completo ao final de toda story, independente dos CI gates intermediários já executados.
 
 ---
 
@@ -252,7 +254,7 @@ Ao concluir, informe:
 >
 > [Se for a última story da Epic:]
 > Todas as stories da Epic N foram implementadas.
-> Próximo passo: `eng-review` para revisar e refatorar o código da Epic N.
+> Próximo passo: `/qa-review` para revisar a Epic N antes de abrir PR.
 >
 > [Se houver stories restantes:]
 > Próxima story: N.X — [título]. Pronto para começar?

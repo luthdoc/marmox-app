@@ -39,6 +39,10 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] Todos os itens de tech debt registrados no Change Log da story estão resolvidos
 - [ ] Nenhum item está registrado como "pendente" sem data e responsável definidos
 
+> **Definição de "resolvido":** o código foi corrigido e o CI passa com essa correção incluída.
+> "Registrado para story futura", "resolver depois", "próxima sprint" ou qualquer variação = **não resolvido** = BLOQUEADO imediato.
+> A única exceção é aprovação explícita do humano via escalação (ver Protocolo de Bloqueio). Aprovação tácita do agente não existe.
+
 **CI**
 - [ ] Linter passa sem erros nos arquivos da story
 - [ ] Type checker passa sem erros

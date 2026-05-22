@@ -100,7 +100,7 @@ Arquivo da story: [CAMINHO COMPLETO]
 
 Execute o checklist completo do Modo 1 (ACs, Tech Debt, CI, Cobertura de Testes, Cleanliness).
 
-Retorne EXATAMENTE um dos dois formatos abaixo:
+Retorne EXATAMENTE um dos três formatos abaixo:
 
 APROVADO
 
@@ -109,6 +109,13 @@ ou
 BLOQUEADO
 - Problema: [descrição exata] | Localização: [arquivo:linha ou AC N] | Critério: [ex: T1, CL2]
 - Problema: ...
+
+ou
+
+ESCALAR
+- Decisão: [descrição exata do que precisa de decisão humana]
+- Por que não é resolvível pelo dev: [explicação]
+- Opções: [alternativas com trade-offs]
 ```
 
 ### Decisão
@@ -121,10 +128,22 @@ BLOQUEADO
 2. Adicione ao `log_rodadas`: bloqueios desta rodada
 3. Incremente `iteração`
 4. Atualize `bloqueios_anteriores` com os problemas desta rodada
-5. Volte para "Rodada DEV"
+5. Reverta o status da story para `in_progress` no arquivo da story
+6. Volte para "Rodada DEV"
 
 **Se QA retornar BLOQUEADO e `iteração == 3`:**
 → Ative o Protocolo de Escalonamento
+
+**Se QA retornar ESCALAR:**
+→ Pare o ciclo imediatamente. Reporte ao humano no seguinte formato:
+
+> ⚠️ Ciclo pausado — decisão necessária na Story [N.M].
+>
+> **Decisão:** [descrição]
+> **Por que não é resolvível pelo dev:** [explicação]
+> **Opções:** [alternativas com trade-offs]
+>
+> Confirme a decisão para retomar o ciclo.
 
 ---
 
