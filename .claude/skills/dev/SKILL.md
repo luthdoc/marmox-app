@@ -100,14 +100,22 @@ Após GREEN, verifique os gatilhos de refactoring nos **arquivos modificados ou 
 
 ### 4. CI Gate — Execute antes de avançar
 
+Execute o CI do **stack tocado pela task**:
+
+| Stack | Comando |
+|-------|---------|
+| Backend (Python/FastAPI) | `cd backend && python -m pytest tests/ -v` |
+| Frontend (Next.js) | `cd frontend && npm run lint && npm run typecheck && npm test` |
+| Ambos | Execute os dois comandos, na ordem acima |
+
+Se existir `test:fast` no `package.json` do frontend, use entre tasks:
 ```bash
-npm run lint && npm run typecheck && npm test
+cd frontend && npm run lint && npm run typecheck && npm run test:fast
 ```
 
-Se existir `test:fast` no `package.json`, use entre tasks:
-```bash
-npm run lint && npm run typecheck && npm run test:fast
-```
+A saída do CI deve ser **copiada verbatim** para o Change Log — não estimada. Ex:
+- `"CI backend: 5 passed"` (de `5 passed in 0.42s` do pytest)
+- `"CI frontend: lint ✅ typecheck ✅ 8 passed"`
 
 **Se o CI falhar com múltiplas falhas:**
 → Spawn um subagent por falha para diagnosticar em paralelo. Consolide as correções, depois re-execute o CI completo.
@@ -118,7 +126,7 @@ npm run lint && npm run typecheck && npm run test:fast
 3. Re-execute o CI completo
 4. Só marque [x] e avance quando **tudo** passar
 
-Se o projeto não tiver script `test`, registre no Change Log: `"CI gate não executado — sem runner configurado"` e registre como tech debt.
+Se o projeto não possuir nenhum runner de testes configurado (sem `pytest`, sem `npm test`), registre no Change Log: `"CI gate não executado — sem runner configurado"` e registre como tech debt. **Isso não se aplica quando o runner existe mas o comando usado estava errado — nesse caso, corrija o comando.**
 
 ### 5. Marque a task [x] e avance para a próxima
 
@@ -156,7 +164,16 @@ Isentos da proporção 1:1:
 
 ## Self-Review antes de "Concluída"
 
-Após todas as tasks estarem marcadas [x] e o CI passar, **spawn um subagent por arquivo modificado** para revisar em paralelo. Cada subagent verifica:
+Após todas as tasks estarem marcadas [x] e o CI passar:
+
+**Passo 0 — Verificação git antes de qualquer revisão:**
+```bash
+git status
+git diff --name-only HEAD
+```
+Confirme que **todos os arquivos de teste** criados ou modificados estão committed (não apenas em working tree). Se houver arquivos de teste não-staged, faça `git add` e commite antes de continuar. Nunca inicie a self-review com testes fora do repositório.
+
+**Passo 1 — Spawn um subagent por arquivo modificado** para revisar em paralelo. Cada subagent verifica:
 
 1. Cada teste cobre comportamento, não implementação?
 2. Alguma linha de produção sem teste correspondente?
@@ -211,6 +228,15 @@ Ao finalizar, atualize o arquivo da story:
 | [data] | Story implementada | Tasks N.M.1 a N.M.X concluídas |
 | [data] | Tech debt registrado | [se houver TODOs] |
 ```
+
+O campo **Notes** do CI deve conter o número exato copiado da saída do runner — não estimado. Exemplos válidos:
+- `"CI backend: 12 passed in 0.38s"`
+- `"CI frontend: lint ✅ typecheck ✅ 8 passed"`
+
+Exemplos inválidos (não use):
+- `"testes passaram"` — sem contagem
+- `"CI ok"` — sem detalhe por stack
+- qualquer número que não esteja na saída real do CI
 
 ---
 

@@ -44,6 +44,24 @@ Só avance após confirmação explícita.
 
 Pergunte qual Epic o usuário quer detalhar agora. Se ele já indicou na mensagem de trigger (ex: "detalha a epic 2"), pule a pergunta.
 
+### Passo 2.5 — Criar branch da Epic
+
+Com a Epic selecionada, crie a branch de desenvolvimento antes de detalhar as stories:
+
+```bash
+git checkout main && git pull origin main && git checkout -b epic-N-[nome-kebab-case]
+```
+
+Onde `N` é o número da Epic e `[nome-kebab-case]` é o nome sem acentos.
+Exemplo: `epic-2-whatsapp-integration`
+
+Se o remote ainda não existir (sem `origin`), omita o `git pull` e crie só a branch local:
+```bash
+git checkout main && git checkout -b epic-N-[nome-kebab-case]
+```
+
+Todos os commits das stories desta Epic vão para esta branch. O merge para `main` acontece somente após `qa-review` aprovar a Epic completa.
+
 ### Passo 3 — Subagent detalha e escreve
 
 Lance um **sub-agente via `Task`** com as seguintes instruções:
@@ -163,10 +181,11 @@ so that [benefício concreto].
 Após o sub-agente criar todos os arquivos da Epic, informe:
 
 > ✅ Epic N criada com M stories em `docs/epics/epic-N-[nome]/`
+> Branch: `epic-N-[nome-kebab-case]`
 >
 > Stories criadas:
 > - N.1 — [título]
 > - N.2 — [título]
 > - ...
 >
-> Próximo passo: `dev` para implementar a Story N.1.
+> Próximo passo: `dev` para implementar a Story N.1 (os commits irão para a branch `epic-N-[nome]`).

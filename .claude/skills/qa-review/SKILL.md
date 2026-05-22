@@ -45,6 +45,17 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] Todos os testes relacionados à story passam
 - [ ] Nenhum teste skipado sem justificativa registrada no Change Log
 
+**Cobertura de Testes**
+- [ ] Execute o CI do stack da story e confirme o número exato de testes reportado:
+      - Backend: `cd backend && python -m pytest tests/ -v`
+      - Frontend: `cd frontend && npm test`
+- [ ] O número de testes reportado pelo CI **bate com o registrado no Change Log** da story
+      (se o Change Log diz "12 passed" e o CI retorna 4, é bloqueio imediato)
+- [ ] Arquivos de teste existem no repositório: `git ls-files backend/tests/` ou `git ls-files frontend/`
+      (working tree não conta — só o que está committed)
+- [ ] Proporção T1 por módulo tocado pela story: linhas de teste ≥ linhas de lógica de negócio
+      Verificar manualmente para cada arquivo de produção criado/modificado pela story
+
 **Cleanliness**
 - [ ] Sem código comentado
 - [ ] Sem imports não utilizados
@@ -136,12 +147,20 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 > Requisitos: [N] FRs cobertos ✅
 > CI: lint ✅ | typecheck ✅ | tests ✅
 > Rules: complexity ✅ | testing ✅ | security ✅ | cleanliness ✅
->
-> Abra o PR com o template abaixo.
 
-**Template do PR:**
-```markdown
-## Epic N — [Nome]
+Execute o push da branch e abra o PR:
+
+```bash
+git push origin epic-N-[nome-kebab-case]
+```
+
+Em seguida, crie o PR com o body preenchido:
+
+```bash
+gh pr create \
+  --title "Epic N — [Nome]" \
+  --base main \
+  --body "## Epic N — [Nome]
 
 ### Stories implementadas
 - [N.1] [Título]
@@ -160,7 +179,11 @@ Security (S1–S5): ✅ | Cleanliness (CL1–CL5): ✅
 
 ### Review Notes
 [Decisões tomadas, trade-offs, tech debt registrado]
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 ```
+
+Após o PR ser aberto, informe a URL retornada pelo `gh pr create`.
 
 > Próximo passo: `to-epic-detail` para detalhar a Epic N+1.
 

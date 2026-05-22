@@ -131,12 +131,34 @@ Antes de salvar, faça uma passagem verificando:
 
 Se qualquer item falhar, corrija antes de salvar.
 
+## Bootstrap do Repositório
+
+Após salvar o PRD, verifique se o repositório remoto está configurado:
+
+```bash
+git remote -v
+```
+
+Se **não houver remote**:
+
+```bash
+gh repo create [nome-do-projeto] --private --source=. --push
+```
+
+Use o nome do projeto em kebab-case (ex: `marmox-app`). O `--source=.` usa o diretório atual e `--push` faz o push inicial automaticamente.
+
+Se **já houver remote configurado**: pule esta etapa.
+
+> O remote deve existir antes da primeira Epic ser detalhada — cada Epic cria uma branch que precisa ser pushada ao longo do desenvolvimento.
+
 ## Saída
 
 Salve em `docs/prd.md`.
 
 Ao finalizar, informe:
 > ✅ PRD salvo em `docs/prd.md`.
+> Repositório remoto: [configurado | criado agora em github.com/user/repo]
+>
 > Próximos passos sugeridos:
 > - `eng-architect` para criar o documento de arquitetura com base neste PRD.
-> - `eng-epic` para quebrar cada Epic em Stories implementáveis.
+> - `to-epic-detail` para quebrar cada Epic em Stories implementáveis.
