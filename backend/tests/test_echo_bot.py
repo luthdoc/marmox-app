@@ -66,6 +66,7 @@ def test_echo_dispatched_for_active_tenant():
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
@@ -93,6 +94,7 @@ def test_echo_not_dispatched_for_onboarding_tenant():
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
@@ -123,6 +125,7 @@ def test_echo_failure_does_not_affect_http_response():
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._dispatch_echo", side_effect=_failing_dispatch),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)

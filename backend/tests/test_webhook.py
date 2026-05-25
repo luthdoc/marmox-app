@@ -148,8 +148,10 @@ def test_webhook_returns_200_and_persists_message_when_tenant_found():
         {"id": "msg-uuid-456"}
     ]
 
-    with patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN), patch(
-        "services.webhook_service.get_client", return_value=mock_supabase
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
@@ -174,3 +176,34 @@ def test_webhook_returns_200_and_persists_message_when_tenant_found():
     assert inserted_data["tenant_id"] == tenant_id
     assert inserted_data["direction"] == "inbound"
     assert inserted_data["lead_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# NFR3 — set_tenant_context é chamado antes de persistir mensagem inbound
+# ---------------------------------------------------------------------------
+
+
+def test_set_tenant_context_called_before_persisting_inbound_message():
+    """set_tenant_context deve ser chamado com o tenant_id correto antes de inserir em messages."""
+    tenant_id = "tenant-uuid-rls"
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": tenant_id, "status": "onboarding"}
+    ]
+    mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [
+        {"id": "msg-uuid-rls"}
+    ]
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context") as mock_set_ctx,
+    ):
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        client.post(
+            "/webhook/whatsapp",
+            json=VALID_PAYLOAD,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
+    mock_set_ctx.assert_called_once_with(tenant_id)

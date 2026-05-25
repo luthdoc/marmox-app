@@ -54,6 +54,7 @@ async def test_send_message_returns_true_on_http_200():
 
     with (
         patch("services.zapi_client.get_client", return_value=mock_client),
+        patch("services.zapi_client.set_tenant_context"),
         patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient,
     ):
         mock_http = AsyncMock()
@@ -97,6 +98,7 @@ async def test_send_message_retries_and_returns_true_on_second_attempt():
 
         with (
             patch("services.zapi_client.get_client", return_value=mock_client),
+            patch("services.zapi_client.set_tenant_context"),
             patch("services.zapi_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient2,
         ):
@@ -149,3 +151,34 @@ async def test_send_message_returns_false_after_all_attempts_fail():
     # backoff exponencial: 1s, 2s
     mock_sleep.assert_any_call(1)
     mock_sleep.assert_any_call(2)
+
+
+# ---------------------------------------------------------------------------
+# NFR3 — set_tenant_context é chamado antes de persistir mensagem outbound
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_tenant_context_called_before_persisting_outbound_message():
+    """set_tenant_context deve ser chamado com o tenant_id correto antes de inserir em messages."""
+    import importlib
+    from services import zapi_client
+    importlib.reload(zapi_client)
+
+    mock_client = _make_supabase_client()
+    mock_response = _make_http_response(200)
+
+    with (
+        patch("services.zapi_client.get_client", return_value=mock_client),
+        patch("services.zapi_client.set_tenant_context") as mock_set_ctx,
+        patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient,
+    ):
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_response)
+        MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+        MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await zapi_client.send_message("tenant-uuid-001", "5511999999999", "Olá!")
+
+    assert result is True
+    mock_set_ctx.assert_called_once_with("tenant-uuid-001")

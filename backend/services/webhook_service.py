@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from db.client import get_client
+from db.client import get_client, set_tenant_context
 from schemas.webhook import ZApiWebhookPayload
 from services.zapi_client import send_message
 
@@ -47,7 +47,8 @@ def _resolve_tenant(instance_id: str) -> dict | None:
 
 
 def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
-    """Persiste a mensagem inbound na tabela messages."""
+    """Persiste a mensagem inbound na tabela messages (NFR3: RLS ativo via set_tenant_context)."""
+    set_tenant_context(tenant_id)
     client = get_client()
     client.table("messages").insert(
         {
@@ -112,7 +113,7 @@ def process_inbound_message(
     tenant_status = tenant_row["status"]
     # is_text_message garante que text não é None; o type checker não consegue inferir
     message_text = payload.text.message  # type: ignore[union-attr]
-    asyncio.ensure_future(_handle_text_message(tenant_id, tenant_status, payload.phone, message_text))
+    asyncio.create_task(_handle_text_message(tenant_id, tenant_status, payload.phone, message_text))
 
     return {"received": True}
 

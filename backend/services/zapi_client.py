@@ -18,7 +18,7 @@ from typing import TypedDict
 
 import httpx
 
-from db.client import get_client
+from db.client import get_client, set_tenant_context
 
 logger = logging.getLogger(__name__)
 
@@ -209,13 +209,14 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
 
 
 def _persist_outbound_message(tenant_id: str, phone: str, content: str) -> None:
-    """Persiste a mensagem enviada com sucesso na tabela messages.
+    """Persiste a mensagem enviada com sucesso na tabela messages (NFR3: RLS ativo via set_tenant_context).
 
     Args:
         tenant_id: UUID do tenant remetente.
         phone: Número do destinatário.
         content: Texto da mensagem enviada.
     """
+    set_tenant_context(tenant_id)
     client = get_client()
     client.table("messages").insert(
         {
