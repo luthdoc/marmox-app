@@ -8,7 +8,7 @@ Cenários cobertos:
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -66,7 +66,7 @@ def test_echo_dispatched_for_active_tenant():
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
+        patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch("services.webhook_service.asyncio") as mock_asyncio,
     ):
         mock_asyncio.create_task = MagicMock()
@@ -92,15 +92,11 @@ def test_echo_dispatched_for_active_tenant():
 def test_echo_not_dispatched_for_onboarding_tenant():
     """Webhook com tenant em onboarding não deve chamar send_message."""
     mock_supabase = _make_supabase_mock(tenant_status="onboarding", tenant_id="tenant-onboarding-001")
-    # Ajuste: instanceId do payload de onboarding
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
-        {"id": "tenant-onboarding-001", "status": "onboarding"}
-    ]
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
+        patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch("services.webhook_service.asyncio") as mock_asyncio,
     ):
         mock_asyncio.create_task = MagicMock()
