@@ -53,17 +53,17 @@ def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
             return {"zapi_instance_id": instance_id, "zapi_token": token}
 
     client = get_client()
-    result = (
+    tenant_query = (
         client.table("tenants")
         .select("zapi_instance_id, zapi_token")
         .eq("id", tenant_id)
         .execute()
     )
 
-    if not result.data:
+    if not tenant_query.data:
         return None
 
-    row = result.data[0]
+    row = tenant_query.data[0]
     instance_id = row["zapi_instance_id"]
     token = row["zapi_token"]
     _tenant_credential_cache[tenant_id] = (instance_id, token, now)
