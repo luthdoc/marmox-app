@@ -11,7 +11,6 @@ Cenários cobertos:
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -132,15 +131,14 @@ def test_webhook_returns_200_when_tenant_not_found():
 
 
 # ---------------------------------------------------------------------------
-# AC 1 + AC 5 — Mensagem válida com tenant: 200 + persistência
+# AC 1 — Mensagem válida com tenant encontrado retorna 200
 # ---------------------------------------------------------------------------
 
 
-def test_webhook_returns_200_and_persists_message_when_tenant_found():
-    """POST /webhook/whatsapp com payload válido e tenant existente deve retornar 200 e persistir."""
+def test_webhook_returns_200_when_tenant_found():
+    """POST /webhook/whatsapp com payload válido e tenant existente deve retornar 200."""
     tenant_id = "tenant-uuid-123"
     mock_supabase = MagicMock()
-
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
         {"id": tenant_id, "zapi_instance_id": "instance-abc", "status": "onboarding"}
     ]
@@ -163,14 +161,41 @@ def test_webhook_returns_200_and_persists_message_when_tenant_found():
     assert response.status_code == 200
     assert response.json() == {"received": True}
 
-    # Confirma que insert foi chamado na tabela messages
+
+# ---------------------------------------------------------------------------
+# AC 5 — Mensagem válida com tenant encontrado persiste campos corretos
+# ---------------------------------------------------------------------------
+
+
+def test_webhook_persists_message_with_correct_fields_when_tenant_found():
+    """POST /webhook/whatsapp com tenant existente deve inserir mensagem com campos obrigatórios."""
+    tenant_id = "tenant-uuid-123"
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": tenant_id, "zapi_instance_id": "instance-abc", "status": "onboarding"}
+    ]
+    mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [
+        {"id": "msg-uuid-456"}
+    ]
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
+    ):
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        client.post(
+            "/webhook/whatsapp",
+            json=VALID_PAYLOAD,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
     messages_insert_called = any(
         call.args and call.args[0] == "messages"
         for call in mock_supabase.table.call_args_list
     )
     assert messages_insert_called
 
-    # Confirma campos obrigatórios no insert
     insert_call = mock_supabase.table.return_value.insert.call_args
     inserted_data = insert_call.args[0]
     assert inserted_data["tenant_id"] == tenant_id
@@ -210,25 +235,74 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
 
 
 # ---------------------------------------------------------------------------
-# S2 — Phone com formato inválido não deve ser persistido nem gerar echo
+# S2 — Phone com formato inválido: retorna 200, não persiste, não gera echo
 # ---------------------------------------------------------------------------
 
+_INVALID_PHONE_PAYLOAD = {
+    "instanceId": "instance-abc",
+    "type": "ReceivedCallback",
+    "phone": "55-11-9999",  # formato inválido: contém hífens
+    "text": {"message": "Olá"},
+    "momment": 1234567890,
+}
 
-def test_invalid_phone_format_is_not_persisted():
-    """Mensagem com phone em formato inválido (não numérico ou fora de 10-15 dígitos) deve ser ignorada."""
-    tenant_id = "tenant-uuid-s2"
+
+def _make_supabase_with_active_tenant(tenant_id: str) -> MagicMock:
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
         {"id": tenant_id, "status": "active"}
     ]
+    return mock_supabase
 
-    invalid_phone_payload = {
-        "instanceId": "instance-abc",
-        "type": "ReceivedCallback",
-        "phone": "55-11-9999",  # formato inválido: contém hífens
-        "text": {"message": "Olá"},
-        "momment": 1234567890,
-    }
+
+def test_webhook_returns_200_for_invalid_phone_format():
+    """Webhook deve retornar 200 mesmo quando o phone tem formato inválido."""
+    mock_supabase = _make_supabase_with_active_tenant("tenant-uuid-s2")
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.send_message", new_callable=AsyncMock),
+    ):
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        response = client.post(
+            "/webhook/whatsapp",
+            json=_INVALID_PHONE_PAYLOAD,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True}
+
+
+def test_invalid_phone_format_is_not_persisted():
+    """Mensagem com phone em formato inválido não deve ser inserida em messages."""
+    mock_supabase = _make_supabase_with_active_tenant("tenant-uuid-s2")
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.send_message", new_callable=AsyncMock),
+    ):
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        client.post(
+            "/webhook/whatsapp",
+            json=_INVALID_PHONE_PAYLOAD,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
+    insert_calls = [
+        call for call in mock_supabase.table.call_args_list
+        if call.args and call.args[0] == "messages"
+    ]
+    assert len(insert_calls) == 0
+
+
+def test_invalid_phone_format_does_not_trigger_echo():
+    """Mensagem com phone em formato inválido não deve chamar send_message."""
+    mock_supabase = _make_supabase_with_active_tenant("tenant-uuid-s2")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
@@ -236,24 +310,11 @@ def test_invalid_phone_format_is_not_persisted():
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
-        from fastapi import FastAPI
-        from routers.webhook import router
-        app = FastAPI()
-        app.include_router(router)
-        client = TestClient(app, raise_server_exceptions=False)
-        response = client.post(
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        client.post(
             "/webhook/whatsapp",
-            json=invalid_phone_payload,
+            json=_INVALID_PHONE_PAYLOAD,
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    assert response.status_code == 200
-    assert response.json() == {"received": True}
-    # Nenhuma inserção em messages deve ter ocorrido
-    insert_calls = [
-        call for call in mock_supabase.table.call_args_list
-        if call.args and call.args[0] == "messages"
-    ]
-    assert len(insert_calls) == 0
-    # send_message não deve ter sido chamado
     mock_send.assert_not_called()

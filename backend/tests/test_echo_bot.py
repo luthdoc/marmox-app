@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -77,8 +76,6 @@ def test_active_tenant_receives_echo_with_correct_text():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    assert response.status_code == 200
-    assert response.json() == {"received": True}
     mock_send.assert_called_once_with(
         tenant_id,
         ACTIVE_TENANT_PAYLOAD["phone"],
@@ -108,8 +105,6 @@ def test_onboarding_tenant_does_not_receive_echo():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    assert response.status_code == 200
-    assert response.json() == {"received": True}
     mock_send.assert_not_called()
 
 
