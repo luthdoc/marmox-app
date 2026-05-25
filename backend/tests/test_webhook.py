@@ -104,7 +104,7 @@ def test_webhook_returns_200_for_payload_without_text_message():
 
 
 def test_webhook_returns_200_when_tenant_not_found():
-    """POST /webhook/whatsapp com instanceId sem tenant deve retornar 200 sem persistir."""
+    """POST /webhook/whatsapp com instanceId sem tenant deve retornar 200."""
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
 
@@ -121,7 +121,22 @@ def test_webhook_returns_200_when_tenant_not_found():
     assert response.status_code == 200
     assert response.json() == {"received": True}
 
-    # Não deve ter inserido nada em messages
+
+def test_webhook_does_not_persist_message_when_tenant_not_found():
+    """POST /webhook/whatsapp com instanceId sem tenant não deve inserir em messages."""
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+
+    with patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN), patch(
+        "services.webhook_service.get_client", return_value=mock_supabase
+    ):
+        client = TestClient(_make_app(), raise_server_exceptions=False)
+        client.post(
+            "/webhook/whatsapp",
+            json=VALID_PAYLOAD,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
     insert_calls = [
         call
         for call in mock_supabase.table.call_args_list
