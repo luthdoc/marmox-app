@@ -78,6 +78,49 @@ _MAX_ATTEMPTS = 3
 _ZAPI_BASE_URL = "https://api.z-api.io/instances/{instance_id}/token/{token}/send-text"
 
 
+async def _attempt_post(
+    http_client: httpx.AsyncClient,
+    url: str,
+    payload: dict,
+    tenant_id: str,
+    phone: str,
+    text: str,
+    attempt: int,
+) -> bool:
+    """Executa uma tentativa de POST ao Z-API e loga o resultado.
+
+    Returns:
+        True se a tentativa foi bem-sucedida (HTTP 2xx), False caso contrário.
+    """
+    try:
+        response = await http_client.post(url, json=payload)
+        success = response.status_code < 300
+        logger.info(
+            "Tentativa de envio Z-API",
+            extra={
+                "tenant_id": tenant_id,
+                "phone": phone,
+                "message_length": len(text),
+                "attempt_number": attempt,
+                "success": success,
+            },
+        )
+        return success
+    except Exception as exc:
+        logger.info(
+            "Tentativa de envio Z-API — erro de rede",
+            extra={
+                "tenant_id": tenant_id,
+                "phone": phone,
+                "message_length": len(text),
+                "attempt_number": attempt,
+                "success": False,
+                "error": str(exc),
+            },
+        )
+        return False
+
+
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
 
@@ -104,45 +147,18 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     instance_id = credentials["zapi_instance_id"]
     token = credentials["zapi_token"]
     url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
-    payload = {"phone": phone, "message": text}
+    request_payload = {"phone": phone, "message": text}
 
     async with httpx.AsyncClient() as http_client:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
-            try:
-                response = await http_client.post(url, json=payload)
-                success = response.status_code < 300
-
-                logger.info(
-                    "Tentativa de envio Z-API",
-                    extra={
-                        "tenant_id": tenant_id,
-                        "phone": phone,
-                        "message_length": len(text),
-                        "attempt_number": attempt,
-                        "success": success,
-                    },
-                )
-
-                if success:
-                    _persist_outbound_message(tenant_id, phone, text)
-                    return True
-
-            except Exception as exc:
-                logger.info(
-                    "Tentativa de envio Z-API — erro de rede",
-                    extra={
-                        "tenant_id": tenant_id,
-                        "phone": phone,
-                        "message_length": len(text),
-                        "attempt_number": attempt,
-                        "success": False,
-                        "error": str(exc),
-                    },
-                )
-
+            success = await _attempt_post(
+                http_client, url, request_payload, tenant_id, phone, text, attempt
+            )
+            if success:
+                _persist_outbound_message(tenant_id, phone, text)
+                return True
             if attempt < _MAX_ATTEMPTS:
-                backoff_seconds = 2 ** (attempt - 1)  # 1, 2, 4
-                await asyncio.sleep(backoff_seconds)
+                await asyncio.sleep(2 ** (attempt - 1))  # backoff: 1s, 2s
 
     logger.error(
         "Falha ao enviar mensagem Z-API após todas as tentativas",

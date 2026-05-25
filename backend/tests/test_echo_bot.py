@@ -123,13 +123,17 @@ def test_echo_failure_does_not_affect_http_response():
     """Falha no envio do echo não deve alterar o HTTP 200 retornado pelo webhook."""
     mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-002")
 
+    def _close_coro(coro):
+        """Fecha a coroutine recebida por create_task para evitar ResourceWarning."""
+        coro.close()
+
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.asyncio") as mock_asyncio,
     ):
-        # Simula create_task que vai lançar exceção internamente (fire-and-forget)
-        mock_asyncio.create_task = MagicMock()
+        # create_task recebe e fecha a coroutine — simula descarte fire-and-forget
+        mock_asyncio.create_task = MagicMock(side_effect=_close_coro)
 
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(

@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE TABLE IF NOT EXISTS messages (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id  UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    lead_id    UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    lead_id    UUID REFERENCES leads(id) ON DELETE SET NULL,
+    phone      TEXT NOT NULL,
     direction  TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
     content    TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()

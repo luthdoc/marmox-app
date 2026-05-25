@@ -22,6 +22,44 @@ logger = logging.getLogger(__name__)
 _ACTIVE_STATUS = "active"
 
 
+def _validate_token(received_token: str | None, expected_token: str) -> None:
+    """Lança PermissionError se o token for ausente ou inválido."""
+    if not received_token or received_token != expected_token:
+        raise PermissionError("Token Z-API inválido ou ausente")
+
+
+def _resolve_tenant(instance_id: str) -> dict | None:
+    """Busca o tenant pelo instanceId. Retorna row com id/status ou None."""
+    client = get_client()
+    result = (
+        client.table("tenants")
+        .select("id, status")
+        .eq("zapi_instance_id", instance_id)
+        .execute()
+    )
+    if not result.data:
+        logger.warning(
+            "Tenant não encontrado para instanceId",
+            extra={"instance_id": instance_id},
+        )
+        return None
+    return result.data[0]
+
+
+def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
+    """Persiste a mensagem inbound na tabela messages."""
+    client = get_client()
+    client.table("messages").insert(
+        {
+            "tenant_id": tenant_id,
+            "direction": "inbound",
+            "lead_id": None,
+            "phone": phone,
+            "content": content,
+        }
+    ).execute()
+
+
 def process_inbound_message(
     payload: ZApiWebhookPayload,
     received_token: str | None,
@@ -46,31 +84,18 @@ def process_inbound_message(
     Raises:
         PermissionError: Se o token for ausente ou inválido.
     """
-    if not received_token or received_token != expected_token:
-        raise PermissionError("Token Z-API inválido ou ausente")
+    _validate_token(received_token, expected_token)
 
     if not payload.is_text_message:
         return {"received": True}
 
-    client = get_client()
-
-    tenant_result = (
-        client.table("tenants")
-        .select("id, status")
-        .eq("zapi_instance_id", payload.instanceId)
-        .execute()
-    )
-
-    if not tenant_result.data:
-        logger.warning(
-            "Tenant não encontrado para instanceId",
-            extra={"instance_id": payload.instanceId},
-        )
+    tenant_row = _resolve_tenant(payload.instanceId)
+    if tenant_row is None:
         return {"received": True}
 
-    tenant_row = tenant_result.data[0]
     tenant_id = tenant_row["id"]
     tenant_status = tenant_row["status"]
+    # is_text_message garante que text não é None; o type checker não consegue inferir
     message_text = payload.text.message  # type: ignore[union-attr]
 
     logger.info(
@@ -83,15 +108,7 @@ def process_inbound_message(
         },
     )
 
-    client.table("messages").insert(
-        {
-            "tenant_id": tenant_id,
-            "direction": "inbound",
-            "lead_id": None,
-            "phone": payload.phone,
-            "content": message_text,
-        }
-    ).execute()
+    _persist_inbound_message(tenant_id, payload.phone, message_text)
 
     if tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(_dispatch_echo(tenant_id, payload.phone, message_text))
