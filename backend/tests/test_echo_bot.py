@@ -60,17 +60,14 @@ def _make_supabase_mock(tenant_status: str, tenant_id: str = "tenant-uuid-active
 
 
 def test_echo_dispatched_for_active_tenant():
-    """Webhook com tenant ativo deve chamar send_message com 'Recebi: [texto]'."""
+    """Webhook com tenant ativo deve disparar _dispatch_echo."""
     mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-001")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.asyncio") as mock_asyncio,
+        patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
     ):
-        mock_asyncio.create_task = MagicMock()
-
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
             "/webhook/whatsapp",
@@ -80,8 +77,8 @@ def test_echo_dispatched_for_active_tenant():
 
     assert response.status_code == 200
     assert response.json() == {"received": True}
-    # create_task deve ter sido chamado para disparar o echo de forma fire-and-forget
-    mock_asyncio.create_task.assert_called_once()
+    # _dispatch_echo deve ter sido chamado para disparar o echo de forma fire-and-forget
+    mock_dispatch.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -90,17 +87,14 @@ def test_echo_dispatched_for_active_tenant():
 
 
 def test_echo_not_dispatched_for_onboarding_tenant():
-    """Webhook com tenant em onboarding não deve chamar send_message."""
+    """Webhook com tenant em onboarding não deve chamar _dispatch_echo."""
     mock_supabase = _make_supabase_mock(tenant_status="onboarding", tenant_id="tenant-onboarding-001")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.asyncio") as mock_asyncio,
+        patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
     ):
-        mock_asyncio.create_task = MagicMock()
-
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
             "/webhook/whatsapp",
@@ -110,8 +104,8 @@ def test_echo_not_dispatched_for_onboarding_tenant():
 
     assert response.status_code == 200
     assert response.json() == {"received": True}
-    # create_task NÃO deve ter sido chamado para tenants em onboarding
-    mock_asyncio.create_task.assert_not_called()
+    # _dispatch_echo NÃO deve ter sido chamado para tenants em onboarding
+    mock_dispatch.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -123,18 +117,14 @@ def test_echo_failure_does_not_affect_http_response():
     """Falha no envio do echo não deve alterar o HTTP 200 retornado pelo webhook."""
     mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-002")
 
-    def _close_coro(coro):
-        """Fecha a coroutine recebida por create_task para evitar ResourceWarning."""
-        coro.close()
+    async def _failing_dispatch(*args, **kwargs):
+        raise Exception("Z-API down")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.asyncio") as mock_asyncio,
+        patch("services.webhook_service._dispatch_echo", side_effect=_failing_dispatch),
     ):
-        # create_task recebe e fecha a coroutine — simula descarte fire-and-forget
-        mock_asyncio.create_task = MagicMock(side_effect=_close_coro)
-
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
             "/webhook/whatsapp",
