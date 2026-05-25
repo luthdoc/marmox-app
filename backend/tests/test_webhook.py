@@ -142,7 +142,7 @@ def test_webhook_returns_200_and_persists_message_when_tenant_found():
     mock_supabase = MagicMock()
 
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
-        {"id": tenant_id, "zapi_instance_id": "instance-abc"}
+        {"id": tenant_id, "zapi_instance_id": "instance-abc", "status": "onboarding"}
     ]
     mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [
         {"id": "msg-uuid-456"}
