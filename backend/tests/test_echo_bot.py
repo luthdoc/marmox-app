@@ -2,7 +2,7 @@
 Testes de integração para o echo bot (Story 2.4).
 
 Cenários cobertos:
-- Tenant ativo recebe echo: send_message chamado com "Recebi: [texto]"
+- Tenant ativo recebe echo com texto "Recebi: [mensagem original]" via send_message
 - Tenant em onboarding: send_message NÃO é chamado
 - Falha no envio do echo não afeta resposta HTTP 200 (fire-and-forget)
 """
@@ -55,19 +55,20 @@ def _make_supabase_mock(tenant_status: str, tenant_id: str = "tenant-uuid-active
 
 
 # ---------------------------------------------------------------------------
-# AC 1 + AC 3 + AC 5 — Tenant ativo: echo disparado via send_message
+# AC 1 + AC 3 + AC 5 — Tenant ativo: echo com texto correto via send_message
 # ---------------------------------------------------------------------------
 
 
-def test_echo_dispatched_for_active_tenant():
-    """Webhook com tenant ativo deve disparar _dispatch_echo."""
-    mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-001")
+def test_active_tenant_receives_echo_with_correct_text():
+    """Tenant ativo deve receber send_message com 'Recebi: [mensagem original]'."""
+    tenant_id = "tenant-active-001"
+    mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id=tenant_id)
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
+        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
@@ -78,8 +79,11 @@ def test_echo_dispatched_for_active_tenant():
 
     assert response.status_code == 200
     assert response.json() == {"received": True}
-    # _dispatch_echo deve ter sido chamado para disparar o echo de forma fire-and-forget
-    mock_dispatch.assert_called_once()
+    mock_send.assert_called_once_with(
+        tenant_id,
+        ACTIVE_TENANT_PAYLOAD["phone"],
+        f"Recebi: {ACTIVE_TENANT_PAYLOAD['text']['message']}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -87,15 +91,15 @@ def test_echo_dispatched_for_active_tenant():
 # ---------------------------------------------------------------------------
 
 
-def test_echo_not_dispatched_for_onboarding_tenant():
-    """Webhook com tenant em onboarding não deve chamar _dispatch_echo."""
+def test_onboarding_tenant_does_not_receive_echo():
+    """Tenant em onboarding não deve gerar chamada a send_message."""
     mock_supabase = _make_supabase_mock(tenant_status="onboarding", tenant_id="tenant-onboarding-001")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service._dispatch_echo", new_callable=AsyncMock) as mock_dispatch,
+        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
@@ -106,27 +110,27 @@ def test_echo_not_dispatched_for_onboarding_tenant():
 
     assert response.status_code == 200
     assert response.json() == {"received": True}
-    # _dispatch_echo NÃO deve ter sido chamado para tenants em onboarding
-    mock_dispatch.assert_not_called()
+    mock_send.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# AC 4 — Falha no echo não afeta resposta HTTP
+# AC 4 — Falha no envio do echo não afeta resposta HTTP
 # ---------------------------------------------------------------------------
 
 
 def test_echo_failure_does_not_affect_http_response():
-    """Falha no envio do echo não deve alterar o HTTP 200 retornado pelo webhook."""
+    """Falha em send_message não deve alterar o HTTP 200 retornado pelo webhook."""
     mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-002")
-
-    async def _failing_dispatch(*args, **kwargs):
-        raise Exception("Z-API down")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service._dispatch_echo", side_effect=_failing_dispatch),
+        patch(
+            "services.webhook_service.send_message",
+            new_callable=AsyncMock,
+            side_effect=Exception("Z-API down"),
+        ),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(

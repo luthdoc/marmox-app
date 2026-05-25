@@ -9,7 +9,7 @@ Cenários cobertos:
 - Mensagem válida com tenant encontrado → 200 + persistência no banco
 - Tenant não encontrado → 200 sem persistir
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -207,3 +207,53 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
         )
 
     mock_set_ctx.assert_called_once_with(tenant_id)
+
+
+# ---------------------------------------------------------------------------
+# S2 — Phone com formato inválido não deve ser persistido nem gerar echo
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_phone_format_is_not_persisted():
+    """Mensagem com phone em formato inválido (não numérico ou fora de 10-15 dígitos) deve ser ignorada."""
+    tenant_id = "tenant-uuid-s2"
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": tenant_id, "status": "active"}
+    ]
+
+    invalid_phone_payload = {
+        "instanceId": "instance-abc",
+        "type": "ReceivedCallback",
+        "phone": "55-11-9999",  # formato inválido: contém hífens
+        "text": {"message": "Olá"},
+        "momment": 1234567890,
+    }
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
+    ):
+        from fastapi import FastAPI
+        from routers.webhook import router
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post(
+            "/webhook/whatsapp",
+            json=invalid_phone_payload,
+            headers={"X-Zapi-Token": VALID_TOKEN},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True}
+    # Nenhuma inserção em messages deve ter ocorrido
+    insert_calls = [
+        call for call in mock_supabase.table.call_args_list
+        if call.args and call.args[0] == "messages"
+    ]
+    assert len(insert_calls) == 0
+    # send_message não deve ter sido chamado
+    mock_send.assert_not_called()

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from dataclasses import dataclass
 
 from db.client import get_client, set_tenant_context
 from schemas.webhook import ZApiWebhookPayload
@@ -20,6 +22,22 @@ from services.zapi_client import send_message
 logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUS = "active"
+_PHONE_RE = re.compile(r"^\d{10,15}$")
+
+
+def _is_valid_phone(phone: str | None) -> bool:
+    """Retorna True se o phone está no formato numérico Z-API (10–15 dígitos, sem '+')."""
+    return phone is not None and bool(_PHONE_RE.match(phone))
+
+
+@dataclass
+class InboundMessage:
+    """Agrupa os dados de uma mensagem inbound para processamento interno."""
+
+    tenant_id: str
+    tenant_status: str
+    phone: str
+    text: str
 
 
 def _validate_token(received_token: str | None, expected_token: str) -> None:
@@ -61,19 +79,28 @@ def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
     ).execute()
 
 
-async def _handle_text_message(tenant_id: str, tenant_status: str, phone: str, text: str) -> None:
-    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo."""
+async def _handle_text_message(msg: InboundMessage) -> None:
+    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo.
+
+    Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
+    """
+    if not _is_valid_phone(msg.phone):
+        logger.warning(
+            "Mensagem descartada — phone com formato inválido",
+            extra={"tenant_id": msg.tenant_id, "phone": msg.phone},
+        )
+        return
     logger.info(
         "Mensagem inbound recebida",
         extra={
-            "tenant_id": tenant_id,
-            "phone": phone,
-            "message_length": len(text),
+            "tenant_id": msg.tenant_id,
+            "phone": msg.phone,
+            "message_length": len(msg.text),
         },
     )
-    _persist_inbound_message(tenant_id, phone, text)
-    if tenant_status == _ACTIVE_STATUS:
-        asyncio.create_task(_dispatch_echo(tenant_id, phone, text))
+    _persist_inbound_message(msg.tenant_id, msg.phone, msg.text)
+    if msg.tenant_status == _ACTIVE_STATUS:
+        asyncio.create_task(_dispatch_echo(msg.tenant_id, msg.phone, msg.text))
 
 
 def process_inbound_message(
@@ -109,11 +136,14 @@ def process_inbound_message(
     if tenant_row is None:
         return {"received": True}
 
-    tenant_id = tenant_row["id"]
-    tenant_status = tenant_row["status"]
-    # is_text_message garante que text não é None; o type checker não consegue inferir
-    message_text = payload.text.message  # type: ignore[union-attr]
-    asyncio.create_task(_handle_text_message(tenant_id, tenant_status, payload.phone, message_text))
+    # is_text_message garante que text e phone não são None; o type checker não consegue inferir
+    msg = InboundMessage(
+        tenant_id=tenant_row["id"],
+        tenant_status=tenant_row["status"],
+        phone=payload.phone,  # type: ignore[arg-type]
+        text=payload.text.message,  # type: ignore[union-attr]
+    )
+    asyncio.create_task(_handle_text_message(msg))
 
     return {"received": True}
 
