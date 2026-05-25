@@ -9,8 +9,7 @@ Cobre:
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
