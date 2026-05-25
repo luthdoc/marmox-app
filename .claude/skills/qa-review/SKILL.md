@@ -60,6 +60,16 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] Proporção T1 por módulo tocado pela story: linhas de teste ≥ linhas de lógica de negócio
       Verificar manualmente para cada arquivo de produção criado/modificado pela story
 
+**NFRs do PRD**
+
+Para cada arquivo de produção tocado pela story, verifique os NFRs do `docs/prd.md` que se aplicam:
+
+- [ ] Se a story toca serviços com queries ao banco: `set_tenant_context(tenant_id)` é chamado antes de qualquer operação de leitura ou escrita — confirme no código, não apenas nos testes
+- [ ] Se a story recebe input externo (webhook, API, form): todo campo usado em lógica de negócio ou persistido tem validação de tipo/formato no código
+- [ ] Se a story retorna dados ao cliente: response não expõe campos internos, IDs de outros tenants ou stack traces
+
+> Se qualquer item acima falhar e não existia um AC cobrindo o NFR na story: o bloqueio é duplo — **reportar o bug de implementação E reportar que o AC da story estava incompleto** (para que `to-epic-detail` corrija stories futuras similares).
+
 **Cleanliness**
 - [ ] Sem código comentado
 - [ ] Sem imports não utilizados
