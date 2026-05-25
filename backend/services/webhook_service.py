@@ -60,6 +60,21 @@ def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
     ).execute()
 
 
+async def _handle_text_message(tenant_id: str, tenant_status: str, phone: str, text: str) -> None:
+    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo."""
+    logger.info(
+        "Mensagem inbound recebida",
+        extra={
+            "tenant_id": tenant_id,
+            "phone": phone,
+            "message_length": len(text),
+        },
+    )
+    _persist_inbound_message(tenant_id, phone, text)
+    if tenant_status == _ACTIVE_STATUS:
+        asyncio.create_task(_dispatch_echo(tenant_id, phone, text))
+
+
 def process_inbound_message(
     payload: ZApiWebhookPayload,
     received_token: str | None,
@@ -97,21 +112,7 @@ def process_inbound_message(
     tenant_status = tenant_row["status"]
     # is_text_message garante que text não é None; o type checker não consegue inferir
     message_text = payload.text.message  # type: ignore[union-attr]
-
-    logger.info(
-        "Mensagem inbound recebida",
-        extra={
-            "tenant_id": tenant_id,
-            "phone": payload.phone,
-            "message_length": len(message_text),
-            "instance_id": payload.instanceId,
-        },
-    )
-
-    _persist_inbound_message(tenant_id, payload.phone, message_text)
-
-    if tenant_status == _ACTIVE_STATUS:
-        asyncio.create_task(_dispatch_echo(tenant_id, payload.phone, message_text))
+    asyncio.ensure_future(_handle_text_message(tenant_id, tenant_status, payload.phone, message_text))
 
     return {"received": True}
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import TypedDict
 
 import httpx
@@ -34,6 +35,15 @@ _tenant_credential_cache: dict[str, tuple[str, str, float]] = {}
 class TenantCredentials(TypedDict):
     zapi_instance_id: str
     zapi_token: str
+
+
+def _parse_tenant_credentials(row: dict) -> tuple[str, str]:
+    """Extrai instance_id e token do row do banco; lança ValueError se ausentes."""
+    instance_id = row.get("zapi_instance_id")
+    token = row.get("zapi_token")
+    if not instance_id or not token:
+        raise ValueError("Credenciais Z-API ausentes no tenant")
+    return instance_id, token
 
 
 def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
@@ -63,9 +73,7 @@ def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
     if not tenant_query.data:
         return None
 
-    row = tenant_query.data[0]
-    instance_id = row["zapi_instance_id"]
-    token = row["zapi_token"]
+    instance_id, token = _parse_tenant_credentials(tenant_query.data[0])
     _tenant_credential_cache[tenant_id] = (instance_id, token, now)
     return {"zapi_instance_id": instance_id, "zapi_token": token}
 
@@ -78,13 +86,47 @@ _MAX_ATTEMPTS = 3
 _ZAPI_BASE_URL = "https://api.z-api.io/instances/{instance_id}/token/{token}/send-text"
 
 
+@dataclass
+class SendContext:
+    url: str
+    payload: dict
+    tenant_id: str
+    phone: str
+    text: str
+
+
+def _log_send_success(ctx: SendContext, attempt: int) -> None:
+    """Loga tentativa de envio bem-sucedida."""
+    logger.info(
+        "Tentativa de envio Z-API",
+        extra={
+            "tenant_id": ctx.tenant_id,
+            "phone": ctx.phone,
+            "message_length": len(ctx.text),
+            "attempt_number": attempt,
+            "success": True,
+        },
+    )
+
+
+def _log_send_failure(ctx: SendContext, attempt: int, error: str | None = None) -> None:
+    """Loga tentativa de envio com falha."""
+    extra: dict = {
+        "tenant_id": ctx.tenant_id,
+        "phone": ctx.phone,
+        "message_length": len(ctx.text),
+        "attempt_number": attempt,
+        "success": False,
+    }
+    if error is not None:
+        extra["error"] = error
+    label = "Tentativa de envio Z-API — erro de rede" if error else "Tentativa de envio Z-API"
+    logger.info(label, extra=extra)
+
+
 async def _attempt_post(
     http_client: httpx.AsyncClient,
-    url: str,
-    payload: dict,
-    tenant_id: str,
-    phone: str,
-    text: str,
+    ctx: SendContext,
     attempt: int,
 ) -> bool:
     """Executa uma tentativa de POST ao Z-API e loga o resultado.
@@ -93,32 +135,31 @@ async def _attempt_post(
         True se a tentativa foi bem-sucedida (HTTP 2xx), False caso contrário.
     """
     try:
-        response = await http_client.post(url, json=payload)
+        response = await http_client.post(ctx.url, json=ctx.payload)
         success = response.status_code < 300
-        logger.info(
-            "Tentativa de envio Z-API",
-            extra={
-                "tenant_id": tenant_id,
-                "phone": phone,
-                "message_length": len(text),
-                "attempt_number": attempt,
-                "success": success,
-            },
-        )
+        if success:
+            _log_send_success(ctx, attempt)
+        else:
+            _log_send_failure(ctx, attempt)
         return success
     except Exception as exc:
-        logger.info(
-            "Tentativa de envio Z-API — erro de rede",
-            extra={
-                "tenant_id": tenant_id,
-                "phone": phone,
-                "message_length": len(text),
-                "attempt_number": attempt,
-                "success": False,
-                "error": str(exc),
-            },
-        )
+        _log_send_failure(ctx, attempt, error=str(exc))
         return False
+
+
+async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
+    """Executa loop de retry com backoff exponencial (até 3 tentativas).
+
+    Returns:
+        True se alguma tentativa foi bem-sucedida, False caso contrário.
+    """
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        success = await _attempt_post(http_client, ctx, attempt)
+        if success:
+            return True
+        if attempt < _MAX_ATTEMPTS:
+            await asyncio.sleep(2 ** (attempt - 1))  # backoff: 1s, 2s
+    return False
 
 
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
@@ -147,18 +188,14 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     instance_id = credentials["zapi_instance_id"]
     token = credentials["zapi_token"]
     url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
-    request_payload = {"phone": phone, "message": text}
+    ctx = SendContext(url=url, payload={"phone": phone, "message": text}, tenant_id=tenant_id, phone=phone, text=text)
 
     async with httpx.AsyncClient() as http_client:
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
-            success = await _attempt_post(
-                http_client, url, request_payload, tenant_id, phone, text, attempt
-            )
-            if success:
-                _persist_outbound_message(tenant_id, phone, text)
-                return True
-            if attempt < _MAX_ATTEMPTS:
-                await asyncio.sleep(2 ** (attempt - 1))  # backoff: 1s, 2s
+        success = await _retry_send(http_client, ctx)
+
+    if success:
+        _persist_outbound_message(tenant_id, phone, text)
+        return True
 
     logger.error(
         "Falha ao enviar mensagem Z-API após todas as tentativas",
