@@ -117,8 +117,14 @@ Spawn **dois sub-agentes em paralelo**:
 - Retorne: mapa FR/NFR → Story → AC para rastreabilidade
 
 **Sub-agente 2 — Análise do Código:**
+- Execute o script de métricas e capture o JSON:
+  ```bash
+  cd backend && pip install radon -q && python scripts/check_metrics.py --json
+  ```
 - Liste todos os arquivos modificados/criados pelas Stories desta Epic (via `git diff` ou análise direta)
-- Retorne: inventário completo com contagem de linhas por arquivo, proporção código/teste, lista de arquivos por tipo (produção, teste, config)
+- Retorne: o JSON completo do script + inventário de arquivos por tipo (produção, teste, config)
+
+> **IMPORTANTE:** Para C1, C4 e T1, use **exclusivamente os valores do JSON** — nunca conte linhas manualmente. Contagem manual produz números inconsistentes entre rodadas e gera falsos positivos.
 
 Consolide os retornos antes de prosseguir.
 
