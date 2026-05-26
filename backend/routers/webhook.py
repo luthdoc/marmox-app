@@ -46,8 +46,8 @@ async def receive_whatsapp_webhook(
     expected_token = _get_expected_token()
 
     try:
-        result = process_inbound_message(payload, x_zapi_token, expected_token)
+        service_response = process_inbound_message(payload, x_zapi_token, expected_token)
     except PermissionError:
         raise HTTPException(status_code=401, detail="Token inválido ou ausente")
 
-    return JSONResponse(content=result)
+    return JSONResponse(content=service_response)

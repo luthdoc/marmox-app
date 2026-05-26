@@ -22,15 +22,13 @@ INSERT INTO tenants (
     status,
     zapi_instance_id,
     zapi_token,
-    created_at,
-    updated_at
+    created_at
 ) VALUES (
     gen_random_uuid(),
     'Marmoraria Teste Echo',
     'active',
     '<SEU_ZAPI_INSTANCE_ID>',   -- Ex: 'ABC123XYZ'
     '<SEU_ZAPI_TOKEN>',          -- Token da instância Z-API
-    now(),
     now()
 )
 RETURNING id;
@@ -105,7 +103,7 @@ UPDATE tenants SET status = 'active' WHERE id = '<ID_DO_TENANT_SEED>';
 Nos logs do backend, as seguintes entradas devem aparecer para cada mensagem processada:
 
 ```
-INFO  Mensagem inbound recebida  {"tenant_id": "...", "phone": "...", "message_length": N}
+INFO  Mensagem inbound recebida  {"tenant_id": "...", "phone": "...", "message_length": N, "instance_id": "..."}
 INFO  Tentativa de envio Z-API   {"attempt_number": 1, "success": true}
 ```
 

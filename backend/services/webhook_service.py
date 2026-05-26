@@ -39,6 +39,7 @@ class InboundMessage:
     tenant_status: str
     phone: str
     text: str
+    instance_id: str
 
 
 def _validate_token(received_token: str | None, expected_token: str) -> None:
@@ -50,19 +51,19 @@ def _validate_token(received_token: str | None, expected_token: str) -> None:
 def _resolve_tenant(instance_id: str) -> dict | None:
     """Busca o tenant pelo instanceId. Retorna row com id/status ou None."""
     client = get_client()
-    result = (
+    tenant_query_result = (
         client.table("tenants")
         .select("id, status")
         .eq("zapi_instance_id", instance_id)
         .execute()
     )
-    if not result.data:
+    if not tenant_query_result.data:
         logger.warning(
             "Tenant não encontrado para instanceId",
             extra={"instance_id": instance_id},
         )
         return None
-    return result.data[0]
+    return tenant_query_result.data[0]
 
 
 def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
@@ -97,6 +98,7 @@ async def _handle_text_message(msg: InboundMessage) -> None:
             "tenant_id": msg.tenant_id,
             "phone": msg.phone,
             "message_length": len(msg.text),
+            "instance_id": msg.instance_id,
         },
     )
     loop = asyncio.get_event_loop()
@@ -147,6 +149,7 @@ def process_inbound_message(
         tenant_status=tenant_row["status"],
         phone=payload.phone,  # type: ignore[arg-type]
         text=payload.text.message,  # type: ignore[union-attr]
+        instance_id=payload.instanceId,
     )
     asyncio.create_task(_handle_text_message(msg))
 
