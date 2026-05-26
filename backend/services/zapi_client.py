@@ -121,7 +121,7 @@ def _log_send_failure(ctx: SendContext, attempt: int, error: str | None = None) 
     if error is not None:
         extra["error"] = error
     label = "Tentativa de envio Z-API — erro de rede" if error else "Tentativa de envio Z-API"
-    logger.info(label, extra=extra)
+    logger.warning(label, extra=extra)
 
 
 async def _attempt_post(
@@ -166,7 +166,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
 
     Busca as credenciais do tenant, faz até 3 tentativas com backoff
-    exponencial (1s, 2s, 4s) e persiste a mensagem enviada na tabela
+    exponencial (1s, 2s) e persiste a mensagem enviada na tabela
     messages em caso de sucesso.
 
     Args:
@@ -177,7 +177,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     Returns:
         True se a mensagem foi enviada com sucesso (HTTP 2xx), False caso contrário.
     """
-    credentials = _get_tenant_credentials(tenant_id)
+    credentials = await asyncio.to_thread(_get_tenant_credentials, tenant_id)
     if credentials is None:
         logger.error(
             "Tenant não encontrado para envio de mensagem",
@@ -194,7 +194,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
         success = await _retry_send(http_client, ctx)
 
     if success:
-        _persist_outbound_message(tenant_id, phone, text)
+        await asyncio.to_thread(_persist_outbound_message, tenant_id, phone, text)
         return True
 
     logger.error(
