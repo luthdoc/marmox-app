@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from functools import partial
 
 from db.client import get_client, set_tenant_context
 from schemas.webhook import ZApiWebhookPayload
@@ -98,7 +99,11 @@ async def _handle_text_message(msg: InboundMessage) -> None:
             "message_length": len(msg.text),
         },
     )
-    _persist_inbound_message(msg.tenant_id, msg.phone, msg.text)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text),
+    )
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(_dispatch_echo(msg.tenant_id, msg.phone, msg.text))
 

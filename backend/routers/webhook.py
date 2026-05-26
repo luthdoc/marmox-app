@@ -7,6 +7,8 @@ O router não contém lógica de negócio.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -17,9 +19,15 @@ from services.webhook_service import process_inbound_message
 router = APIRouter()
 
 
+@lru_cache(maxsize=1)
+def _get_settings() -> Settings:
+    """Retorna o singleton de configuração (instanciado uma única vez no primeiro uso)."""
+    return Settings()
+
+
 def _get_expected_token() -> str:
-    """Lê o token Z-API esperado da configuração."""
-    return Settings().zapi_token
+    """Retorna o token Z-API esperado, lido do singleton de configuração."""
+    return _get_settings().zapi_token
 
 
 @router.post("/webhook/whatsapp")
