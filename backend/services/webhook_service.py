@@ -81,17 +81,16 @@ def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
     ).execute()
 
 
-async def _handle_text_message(msg: InboundMessage) -> None:
-    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo.
+def _log_invalid_phone(msg: InboundMessage) -> None:
+    """Loga aviso de mensagem descartada por phone em formato inválido."""
+    logger.warning(
+        "Mensagem descartada — phone com formato inválido",
+        extra={"tenant_id": msg.tenant_id, "phone": msg.phone},
+    )
 
-    Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
-    """
-    if not _is_valid_phone(msg.phone):
-        logger.warning(
-            "Mensagem descartada — phone com formato inválido",
-            extra={"tenant_id": msg.tenant_id, "phone": msg.phone},
-        )
-        return
+
+def _log_inbound_received(msg: InboundMessage) -> None:
+    """Loga recebimento de mensagem inbound."""
     logger.info(
         "Mensagem inbound recebida",
         extra={
@@ -101,6 +100,17 @@ async def _handle_text_message(msg: InboundMessage) -> None:
             "instance_id": msg.instance_id,
         },
     )
+
+
+async def _handle_text_message(msg: InboundMessage) -> None:
+    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo.
+
+    Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
+    """
+    if not _is_valid_phone(msg.phone):
+        _log_invalid_phone(msg)
+        return
+    _log_inbound_received(msg)
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None,

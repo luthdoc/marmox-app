@@ -178,6 +178,26 @@ def _build_send_context(
     )
 
 
+def _log_tenant_not_found(tenant_id: str, phone: str) -> None:
+    """Loga erro de tenant não encontrado ao tentar enviar mensagem."""
+    logger.error(
+        "Tenant não encontrado para envio de mensagem",
+        extra={"tenant_id": tenant_id, "phone": phone},
+    )
+
+
+def _log_send_exhausted(tenant_id: str, phone: str) -> None:
+    """Loga erro de esgotamento de tentativas de envio Z-API."""
+    logger.error(
+        "Falha ao enviar mensagem Z-API após todas as tentativas",
+        extra={
+            "tenant_id": tenant_id,
+            "phone": phone,
+            "error": f"HTTP não-2xx em {_MAX_ATTEMPTS} tentativas",
+        },
+    )
+
+
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
 
@@ -195,10 +215,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """
     credentials = await asyncio.to_thread(_get_tenant_credentials, tenant_id)
     if credentials is None:
-        logger.error(
-            "Tenant não encontrado para envio de mensagem",
-            extra={"tenant_id": tenant_id, "phone": phone},
-        )
+        _log_tenant_not_found(tenant_id, phone)
         return False
 
     ctx = _build_send_context(credentials, tenant_id, phone, text)
@@ -210,14 +227,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
         await asyncio.to_thread(_persist_outbound_message, tenant_id, phone, text)
         return True
 
-    logger.error(
-        "Falha ao enviar mensagem Z-API após todas as tentativas",
-        extra={
-            "tenant_id": tenant_id,
-            "phone": phone,
-            "error": f"HTTP não-2xx em {_MAX_ATTEMPTS} tentativas",
-        },
-    )
+    _log_send_exhausted(tenant_id, phone)
     return False
 
 
