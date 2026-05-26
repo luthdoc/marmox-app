@@ -53,7 +53,7 @@ Inicialize:
 - `bloqueios_anteriores = []`
 - `log_rodadas = []`
 
-### Rodada DEV
+### Rodada DEV (apenas iteração 1)
 
 Spawn um subagent (tipo `general-purpose`) com o seguinte prompt — substitua os campos em `[colchetes]` com os dados reais:
 
@@ -64,13 +64,6 @@ Siga TODAS as instruções de `.claude/skills/dev/SKILL.md` sem exceção.
 
 Story alvo: [NÚMERO]
 Arquivo da story: [CAMINHO COMPLETO]
-
-[INCLUIR ESTE BLOCO APENAS SE iteração > 1:]
-Esta é uma rodada de CORREÇÃO (rodada [NÚMERO DA ITERAÇÃO]).
-Os seguintes bloqueios foram identificados pelo QA na rodada anterior — corrija apenas estes:
-[LISTA DE BLOQUEIOS com arquivo:linha e critério violado]
-Não altere o que já passou no QA.
-[FIM DO BLOCO CONDICIONAL]
 
 Execute o ciclo completo:
 1. RED → GREEN → REFACTOR → CI gate por task
@@ -83,6 +76,26 @@ Ao terminar, informe: tasks concluídas, resultado do CI (número exato de teste
 ```
 
 Aguarde a conclusão. Registre no `log_rodadas`: o que o DEV fez, CI result, hash do commit.
+
+---
+
+### Rodada FIX (iterações 2 e 3)
+
+Spawn um subagent (tipo `general-purpose`) com o seguinte prompt — substitua os campos em `[colchetes]` com os dados reais:
+
+```
+Você é o agente de correção cirúrgica da story [NÚMERO].
+
+Siga TODAS as instruções de `.claude/agents/fix.md` sem exceção.
+
+Story alvo: [NÚMERO]
+Arquivo da story: [CAMINHO COMPLETO]
+
+Achados do QA a corrigir (corrija APENAS estes — não altere o que já passou):
+[COPIE CADA LINHA DOS BLOQUEIOS no formato: Problema: X | Localização: arquivo:linha | Critério: Y]
+```
+
+Aguarde a conclusão. Registre no `log_rodadas`: o que o FIX corrigiu, CI result, hash do commit.
 
 ### Rodada QA
 
@@ -129,7 +142,7 @@ ESCALAR
 3. Incremente `iteração`
 4. Atualize `bloqueios_anteriores` com os problemas desta rodada
 5. Reverta o status da story para `in_progress` no arquivo da story
-6. Volte para "Rodada DEV"
+6. Vá para "Rodada FIX"
 
 **Se QA retornar BLOQUEADO e `iteração == 3`:**
 → Ative o Protocolo de Escalonamento
