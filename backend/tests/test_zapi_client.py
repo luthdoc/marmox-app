@@ -121,15 +121,14 @@ async def test_send_message_retries_and_returns_true_on_second_attempt():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_send_message_returns_false_after_all_attempts_fail():
-    """send_message retorna False (sem exception) quando todas as 3 tentativas falham com HTTP 500."""
-    mock_client = _make_supabase_client()
-    fail_response = _make_http_response(500)
-
+async def _run_all_attempts_fail():
+    """Executa send_message com todas as tentativas falhando (HTTP 500); retorna (result, mock_sleep)."""
     import importlib
     from services import zapi_client
     importlib.reload(zapi_client)
+
+    mock_client = _make_supabase_client()
+    fail_response = _make_http_response(500)
 
     with (
         patch("services.zapi_client.get_client", return_value=mock_client),
@@ -144,12 +143,34 @@ async def test_send_message_returns_false_after_all_attempts_fail():
         result = await zapi_client.send_message(
             "tenant-uuid-001", "5511999999999", "Olá!"
         )
+        return result, mock_sleep
 
+
+@pytest.mark.asyncio
+async def test_send_message_returns_false_after_all_attempts_fail():
+    """send_message retorna False quando todas as 3 tentativas falham com HTTP 500."""
+    result, _ = await _run_all_attempts_fail()
     assert result is False
-    # 3 tentativas → 2 sleeps (após falha 1 e após falha 2; na 3ª não dorme)
+
+
+@pytest.mark.asyncio
+async def test_send_message_sleeps_twice_after_all_attempts_fail():
+    """send_message realiza exatamente 2 sleeps (entre tentativas 1→2 e 2→3) quando todas falham."""
+    _, mock_sleep = await _run_all_attempts_fail()
     assert mock_sleep.call_count == 2
-    # backoff exponencial: 1s, 2s
+
+
+@pytest.mark.asyncio
+async def test_send_message_first_backoff_is_one_second_after_all_attempts_fail():
+    """send_message aplica backoff de 1s após a 1ª tentativa falhar."""
+    _, mock_sleep = await _run_all_attempts_fail()
     mock_sleep.assert_any_call(1)
+
+
+@pytest.mark.asyncio
+async def test_send_message_second_backoff_is_two_seconds_after_all_attempts_fail():
+    """send_message aplica backoff de 2s após a 2ª tentativa falhar."""
+    _, mock_sleep = await _run_all_attempts_fail()
     mock_sleep.assert_any_call(2)
 
 

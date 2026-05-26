@@ -182,9 +182,8 @@ def test_webhook_returns_200_when_tenant_found():
 # ---------------------------------------------------------------------------
 
 
-def test_webhook_persists_message_with_correct_fields_when_tenant_found():
-    """POST /webhook/whatsapp com tenant existente deve inserir mensagem com campos obrigatórios."""
-    tenant_id = "tenant-uuid-123"
+def _make_webhook_mock_supabase(tenant_id: str = "tenant-uuid-123"):
+    """Retorna mock do Supabase configurado para tenant válido."""
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
         {"id": tenant_id, "zapi_instance_id": "instance-abc", "status": "onboarding"}
@@ -192,7 +191,11 @@ def test_webhook_persists_message_with_correct_fields_when_tenant_found():
     mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [
         {"id": "msg-uuid-456"}
     ]
+    return mock_supabase
 
+
+def _post_valid_webhook(mock_supabase):
+    """Dispara POST /webhook/whatsapp com payload e token válidos."""
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
@@ -205,17 +208,45 @@ def test_webhook_persists_message_with_correct_fields_when_tenant_found():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
+
+def test_webhook_inserts_into_messages_table_when_tenant_found():
+    """POST /webhook/whatsapp com tenant existente deve chamar insert na tabela messages."""
+    mock_supabase = _make_webhook_mock_supabase()
+    _post_valid_webhook(mock_supabase)
+
     messages_insert_called = any(
         call.args and call.args[0] == "messages"
         for call in mock_supabase.table.call_args_list
     )
     assert messages_insert_called
 
+
+def test_webhook_persists_correct_tenant_id_when_tenant_found():
+    """POST /webhook/whatsapp deve inserir mensagem com tenant_id correto."""
+    tenant_id = "tenant-uuid-123"
+    mock_supabase = _make_webhook_mock_supabase(tenant_id)
+    _post_valid_webhook(mock_supabase)
+
     insert_call = mock_supabase.table.return_value.insert.call_args
-    inserted_data = insert_call.args[0]
-    assert inserted_data["tenant_id"] == tenant_id
-    assert inserted_data["direction"] == "inbound"
-    assert inserted_data["lead_id"] is None
+    assert insert_call.args[0]["tenant_id"] == tenant_id
+
+
+def test_webhook_persists_inbound_direction_when_tenant_found():
+    """POST /webhook/whatsapp deve inserir mensagem com direction='inbound'."""
+    mock_supabase = _make_webhook_mock_supabase()
+    _post_valid_webhook(mock_supabase)
+
+    insert_call = mock_supabase.table.return_value.insert.call_args
+    assert insert_call.args[0]["direction"] == "inbound"
+
+
+def test_webhook_persists_null_lead_id_when_tenant_found():
+    """POST /webhook/whatsapp deve inserir mensagem com lead_id nulo."""
+    mock_supabase = _make_webhook_mock_supabase()
+    _post_valid_webhook(mock_supabase)
+
+    insert_call = mock_supabase.table.return_value.insert.call_args
+    assert insert_call.args[0]["lead_id"] is None
 
 
 # ---------------------------------------------------------------------------

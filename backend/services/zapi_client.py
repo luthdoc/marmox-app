@@ -162,6 +162,22 @@ async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
     return False
 
 
+def _build_send_context(
+    credentials: TenantCredentials, tenant_id: str, phone: str, text: str
+) -> SendContext:
+    """Constrói o SendContext a partir das credenciais e parâmetros da mensagem."""
+    instance_id = credentials["zapi_instance_id"]
+    token = credentials["zapi_token"]
+    url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
+    return SendContext(
+        url=url,
+        payload={"phone": phone, "message": text},
+        tenant_id=tenant_id,
+        phone=phone,
+        text=text,
+    )
+
+
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
 
@@ -185,10 +201,7 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
         )
         return False
 
-    instance_id = credentials["zapi_instance_id"]
-    token = credentials["zapi_token"]
-    url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
-    ctx = SendContext(url=url, payload={"phone": phone, "message": text}, tenant_id=tenant_id, phone=phone, text=text)
+    ctx = _build_send_context(credentials, tenant_id, phone, text)
 
     async with httpx.AsyncClient() as http_client:
         success = await _retry_send(http_client, ctx)
