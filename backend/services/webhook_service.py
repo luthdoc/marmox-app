@@ -1,12 +1,12 @@
 """
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4).
+Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1).
 
 Responsabilidades:
 - Validar o token Z-API contra o esperado
 - Resolver o tenant a partir do instanceId
 - Persistir a mensagem inbound na tabela messages
 - Emitir logs estruturados para cada mensagem recebida
-- Disparar echo automático (fire-and-forget) para tenants com status "active" (Story 2.4)
+- Disparar agente Claude Haiku (fire-and-forget) para tenants com status "active" (Story 3.1)
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from functools import partial
 
 from db.client import get_client, set_tenant_context
 from schemas.webhook import ZApiWebhookPayload
+from services.agent_service import process_message
 from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class InboundMessage:
 
     tenant_id: str
     tenant_status: str
+    tenant_name: str
     phone: str
     text: str
     instance_id: str
@@ -49,11 +51,11 @@ def _validate_token(received_token: str | None, expected_token: str) -> None:
 
 
 def _resolve_tenant(instance_id: str) -> dict | None:
-    """Busca o tenant pelo instanceId. Retorna row com id/status ou None."""
+    """Busca o tenant pelo instanceId. Retorna row com id/status/name ou None."""
     client = get_client()
     tenant_query_result = (
         client.table("tenants")
-        .select("id, status")
+        .select("id, status, name")
         .eq("zapi_instance_id", instance_id)
         .execute()
     )
@@ -103,7 +105,7 @@ def _log_inbound_received(msg: InboundMessage) -> None:
 
 
 async def _handle_text_message(msg: InboundMessage) -> None:
-    """Loga, persiste mensagem inbound e dispara echo se tenant estiver ativo.
+    """Loga, persiste mensagem inbound e dispara agente se tenant estiver ativo.
 
     Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
     """
@@ -117,7 +119,9 @@ async def _handle_text_message(msg: InboundMessage) -> None:
         partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text),
     )
     if msg.tenant_status == _ACTIVE_STATUS:
-        asyncio.create_task(_dispatch_echo(msg.tenant_id, msg.phone, msg.text))
+        asyncio.create_task(
+            _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, msg.text)
+        )
 
 
 async def process_inbound_message(
@@ -129,7 +133,7 @@ async def process_inbound_message(
 
     Valida o token recebido contra o esperado, resolve o tenant pelo instanceId
     e persiste a mensagem quando todos os critérios forem atendidos.
-    Para tenants com status "active", dispara echo automático via fire-and-forget.
+    Para tenants com status "active", dispara o agente Claude via fire-and-forget.
     Retorna sempre {"received": True} para payloads que passaram na validação
     de token — nunca levanta 4xx para payloads desconhecidos do Z-API.
 
@@ -157,6 +161,7 @@ async def process_inbound_message(
     msg = InboundMessage(
         tenant_id=tenant_row["id"],
         tenant_status=tenant_row["status"],
+        tenant_name=tenant_row.get("name", ""),
         phone=payload.phone,  # type: ignore[arg-type]
         text=payload.text.message,  # type: ignore[union-attr]
         instance_id=payload.instanceId,
@@ -166,22 +171,30 @@ async def process_inbound_message(
     return {"received": True}
 
 
-async def _dispatch_echo(tenant_id: str, phone: str, original_text: str) -> None:
-    """Envia o echo da mensagem recebida para o remetente.
+async def _dispatch_agent(
+    tenant_id: str, tenant_name: str, phone: str, text: str
+) -> None:
+    """Processa a mensagem com o agente Claude e envia a resposta ao remetente.
 
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
     Args:
-        tenant_id: UUID do tenant que receberá o envio.
+        tenant_id: UUID do tenant.
+        tenant_name: Nome da empresa do tenant, injetado no system prompt do agente.
         phone: Número do remetente original.
-        original_text: Texto da mensagem recebida.
+        text: Texto da mensagem recebida.
     """
     try:
-        echo_text = f"Recebi: {original_text}"
-        await send_message(tenant_id, phone, echo_text)
+        response_text = await process_message(
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
+            phone=phone,
+            text=text,
+        )
+        await send_message(tenant_id, phone, response_text)
     except Exception as exc:
         logger.error(
-            "Falha ao enviar echo — erro ignorado (fire-and-forget)",
+            "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",
             extra={"tenant_id": tenant_id, "phone": phone, "error": str(exc)},
         )
