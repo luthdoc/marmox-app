@@ -120,7 +120,7 @@ async def _handle_text_message(msg: InboundMessage) -> None:
         asyncio.create_task(_dispatch_echo(msg.tenant_id, msg.phone, msg.text))
 
 
-def process_inbound_message(
+async def process_inbound_message(
     payload: ZApiWebhookPayload,
     received_token: str | None,
     expected_token: str,
@@ -149,7 +149,7 @@ def process_inbound_message(
     if not payload.is_text_message:
         return {"received": True}
 
-    tenant_row = _resolve_tenant(payload.instanceId)
+    tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
     if tenant_row is None:
         return {"received": True}
 

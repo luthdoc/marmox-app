@@ -69,18 +69,18 @@ def test_active_tenant_receives_echo_with_correct_text():
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
-        client = TestClient(_make_app(), raise_server_exceptions=False)
-        response = client.post(
-            "/webhook/whatsapp",
-            json=ACTIVE_TENANT_PAYLOAD,
-            headers={"X-Zapi-Token": VALID_TOKEN},
-        )
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=ACTIVE_TENANT_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
 
-    mock_send.assert_called_once_with(
-        tenant_id,
-        ACTIVE_TENANT_PAYLOAD["phone"],
-        f"Recebi: {ACTIVE_TENANT_PAYLOAD['text']['message']}",
-    )
+        mock_send.assert_called_once_with(
+            tenant_id,
+            ACTIVE_TENANT_PAYLOAD["phone"],
+            f"Recebi: {ACTIVE_TENANT_PAYLOAD['text']['message']}",
+        )
 
 
 # ---------------------------------------------------------------------------

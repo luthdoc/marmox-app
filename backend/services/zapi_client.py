@@ -87,6 +87,13 @@ _ZAPI_BASE_URL = "https://api.z-api.io/instances/{instance_id}/token/{token}/sen
 
 
 @dataclass
+class OutboundMessage:
+    tenant_id: str
+    phone: str
+    text: str
+
+
+@dataclass
 class SendContext:
     url: str
     payload: dict
@@ -163,18 +170,18 @@ async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
 
 
 def _build_send_context(
-    credentials: TenantCredentials, tenant_id: str, phone: str, text: str
+    credentials: TenantCredentials, msg: OutboundMessage
 ) -> SendContext:
-    """Constrói o SendContext a partir das credenciais e parâmetros da mensagem."""
+    """Constrói o SendContext a partir das credenciais e do OutboundMessage."""
     instance_id = credentials["zapi_instance_id"]
     token = credentials["zapi_token"]
     url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
     return SendContext(
         url=url,
-        payload={"phone": phone, "message": text},
-        tenant_id=tenant_id,
-        phone=phone,
-        text=text,
+        payload={"phone": msg.phone, "message": msg.text},
+        tenant_id=msg.tenant_id,
+        phone=msg.phone,
+        text=msg.text,
     )
 
 
@@ -218,7 +225,8 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
         _log_tenant_not_found(tenant_id, phone)
         return False
 
-    ctx = _build_send_context(credentials, tenant_id, phone, text)
+    msg = OutboundMessage(tenant_id=tenant_id, phone=phone, text=text)
+    ctx = _build_send_context(credentials, msg)
 
     async with httpx.AsyncClient() as http_client:
         success = await _retry_send(http_client, ctx)
