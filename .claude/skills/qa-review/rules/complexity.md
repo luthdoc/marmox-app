@@ -12,7 +12,7 @@ Estas regras são **hard gates**. Qualquer violação bloqueia o PR até ser cor
 
 **Por quê:** funções longas fazem mais de uma coisa. Se não cabe em 20 linhas, tem responsabilidade demais.
 
-**Como checar:** conte manualmente ou use o linter configurado. Funções que violam a regra devem ser extraídas em funções menores com nomes expressivos.
+**Como checar:** use o script `backend/scripts/check_metrics.py --json` e leia o campo `c1_violations`. **Não conte linhas manualmente** — o script elimina discrepâncias de contagem entre rodadas. Funções que violam a regra devem ser extraídas em funções menores com nomes expressivos.
 
 **Exceção permitida:** funções de orquestração pura (que só chamam outras funções em sequência, sem lógica condicional própria) podem ter até 30 linhas. Documente com comentário: `// orchestration — sem lógica de negócio`.
 
@@ -104,3 +104,28 @@ function createUser(name, email, role, tenantId, plan) {}
 // ✅
 function createUser(user: CreateUserInput) {}
 ```
+
+---
+
+## C1 + C6 em conjunto — padrão obrigatório
+
+Ao extrair uma função auxiliar para satisfazer C1 (reduzir linhas), é tentador passar os parâmetros avulsos para a nova função — o que viola C6. **O padrão correto é criar o dataclass no ponto de chamada, não esconder os parâmetros no helper.**
+
+```python
+# ❌ extrai helper mas viola C6 (4 params posicionais)
+def _build_context(credentials, tenant_id, phone, text):
+    ...
+
+# ✅ define dataclass e passa como objeto único
+@dataclass
+class SendContext:
+    credentials: TenantCredentials
+    tenant_id: str
+    phone: str
+    text: str
+
+def _build_context(ctx: SendContext):      # 1 parâmetro — C6 ✅
+    ...                                    # ≤ 20 linhas — C1 ✅
+```
+
+**Regra derivada:** funções auxiliares privadas criadas para satisfazer C1 **não são isentas** de C6. A solução é sempre o dataclass, nunca o repasse de parâmetros avulsos.

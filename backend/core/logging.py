@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from typing import IO
 
@@ -16,19 +17,22 @@ class _MarmaxFormatter(JsonFormatter):
         log_record.setdefault("message", record.getMessage())
 
 
-def configure_logging(stream: IO[str] | None = None) -> None:
+def configure_logging(stream: IO[str] | None = None, log_level: str | None = None) -> None:
     """Configura logging estruturado em JSON globalmente.
 
     Args:
         stream: destino dos logs (padrão: sys.stdout). Aceita qualquer IO[str],
                 o que permite injetar StringIO nos testes sem tocar em stdout.
+        log_level: nível de log (ex: "DEBUG", "INFO", "WARNING"). Se None, lê
+                   da variável de ambiente LOG_LEVEL (padrão: "INFO").
     """
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(
         _MarmaxFormatter(fmt="%(asctime)s %(levelname)s %(name)s %(message)s")
     )
 
+    effective_level = log_level or os.environ.get("LOG_LEVEL", "INFO")
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(getattr(logging, effective_level.upper(), logging.INFO))
     root.handlers.clear()
     root.addHandler(handler)

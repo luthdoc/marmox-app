@@ -44,3 +44,20 @@ def test_log_level_error_is_recorded_correctly():
 
     assert record["level"] == "ERROR"
     assert record["message"] == "erro de teste"
+
+
+def test_configure_logging_respects_log_level_parameter():
+    """configure_logging com log_level='WARNING' deve silenciar mensagens INFO."""
+    from core.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging(stream=stream, log_level="WARNING")
+
+    logger = logging.getLogger("test_level_warning")
+    logger.info("mensagem info — não deve aparecer")
+    logger.warning("mensagem warning — deve aparecer")
+
+    output = stream.getvalue().strip()
+    # Apenas o WARNING deve ter sido gravado
+    assert "não deve aparecer" not in output
+    assert "deve aparecer" in output

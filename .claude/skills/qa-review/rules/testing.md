@@ -8,9 +8,11 @@ Estas regras são **hard gates**. Qualquer violação bloqueia o PR até ser cor
 
 ## T1 — Proporção código/teste
 
-**Regra:** linhas de teste ≥ linhas de lógica de negócio por módulo.
+**Regra:** linhas de teste ≥ linhas de lógica de negócio por módulo (ratio ≥ 1.0).
 
-**Como calcular:** conte linhas de lógica de negócio (exclua configs, tipos puros, mocks, código gerado, linhas em branco). Compare com linhas de teste cobrindo aquele módulo. Se ratio < 1:1, adicione testes.
+**Como calcular:** use o script `backend/scripts/check_metrics.py --json` e leia o campo `t1_ratio` por módulo. **Não conte linhas manualmente** — o script produz números determinísticos, evitando falsos positivos por contagem manual inconsistente.
+
+**Tolerância:** ratio entre 0.9 e 1.0 não é bloqueio — registre como observação se o módulo teve cobertura recente aumentada. Ratio < 0.9 é bloqueio.
 
 **Exceção permitida:** arquivos de configuração, tipos TypeScript/interfaces puras, mocks e fixtures, migrations e schemas gerados.
 

@@ -31,8 +31,16 @@ Quando encontrar um problema, o diagnóstico vai para o humano ou de volta para 
 
 Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatamente — não continue o checklist.
 
-**ACs**
-- [ ] Cada Acceptance Criteria da story foi atendido e é verificável no código
+**ACs — verificação evidencial obrigatória**
+
+Para cada AC da story, execute o protocolo:
+1. Leia o AC literal, palavra por palavra
+2. Cite o arquivo:linha exato que satisfaz cada requisito — "parece implementado" não é evidência
+3. Se o AC exige campos específicos em logs, responses ou estruturas de dados: verifique campo a campo no código, não apenas que "existe um log/response"
+4. Se o AC exige um comportamento em cenário específico: confirme que há um teste que cobre exatamente esse cenário com exatamente essas condições
+
+- [ ] Cada AC foi verificado com localização exata no código (arquivo:linha) — não apenas "está implementado"
+- [ ] ACs com listas de campos (logs, responses, payloads): todos os campos foram encontrados no código, nenhum ausente
 - [ ] Nenhum AC foi marcado como "parcial" ou "futuro" sem justificativa explícita
 
 **Tech Debt do Change Log**
@@ -59,6 +67,20 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
       (working tree não conta — só o que está committed)
 - [ ] Proporção T1 por módulo tocado pela story: linhas de teste ≥ linhas de lógica de negócio
       Verificar manualmente para cada arquivo de produção criado/modificado pela story
+
+**NFRs do PRD**
+
+Para cada arquivo de produção tocado pela story, verifique os NFRs do `docs/prd.md` que se aplicam:
+
+- [ ] Se a story toca serviços com queries ao banco: `set_tenant_context(tenant_id)` é chamado antes de qualquer operação de leitura ou escrita — confirme no código, não apenas nos testes
+- [ ] Se a story recebe input externo (webhook, API, form): todo campo usado em lógica de negócio ou persistido tem validação de tipo/formato no código
+- [ ] Se a story retorna dados ao cliente: response não expõe campos internos, IDs de outros tenants ou stack traces
+
+> Se qualquer item acima falhar e não existia um AC cobrindo o NFR na story: o bloqueio é duplo — **reportar o bug de implementação E reportar que o AC da story estava incompleto** (para que `to-epic-detail` corrija stories futuras similares).
+
+**Consistência docs↔código**
+- [ ] Toda docstring ou comentário que descreve comportamento (campos de log, valores de backoff, fluxos, contratos) foi verificado contra o código real — se diverge, é um bug, não só doc desatualizada
+- [ ] Todo `# type: ignore` ou comentário explicativo tem a razão descrita na linha (ex: `# is_text_message já garante text != None`)
 
 **Cleanliness**
 - [ ] Sem código comentado
@@ -95,8 +117,14 @@ Spawn **dois sub-agentes em paralelo**:
 - Retorne: mapa FR/NFR → Story → AC para rastreabilidade
 
 **Sub-agente 2 — Análise do Código:**
+- Execute o script de métricas e capture o JSON:
+  ```bash
+  cd backend && pip install radon -q && python scripts/check_metrics.py --json
+  ```
 - Liste todos os arquivos modificados/criados pelas Stories desta Epic (via `git diff` ou análise direta)
-- Retorne: inventário completo com contagem de linhas por arquivo, proporção código/teste, lista de arquivos por tipo (produção, teste, config)
+- Retorne: o JSON completo do script + inventário de arquivos por tipo (produção, teste, config)
+
+> **IMPORTANTE:** Para C1, C4 e T1, use **exclusivamente os valores do JSON** — nunca conte linhas manualmente. Contagem manual produz números inconsistentes entre rodadas e gera falsos positivos.
 
 Consolide os retornos antes de prosseguir.
 
@@ -138,7 +166,15 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] **S4** — Responses retornam apenas os campos necessários
 - [ ] **S5** — Nenhuma dependência com vulnerabilidade `high` ou `critical`
 
-**6. Cleanliness (CL1–CL5)** — ver `rules/cleanliness.md`
+**6. Stack-Specific (PF1–PF6)** — ver `rules/python-fastapi.md` (se stack Python/FastAPI)
+- [ ] **PF1** — Nenhuma chamada síncrona de I/O dentro de função `async` (banco, HTTP, disco)
+- [ ] **PF2** — `Settings()` não é instanciado no caminho de cada request (deve ser singleton ou constante no boot)
+- [ ] **PF3** — Níveis de log condizem com severidade: falhas usam `warning`/`error`, nunca `info`
+- [ ] **PF4** — Dependências de teste não estão em `requirements.txt` de produção (usar `requirements-dev.txt` ou `[dev]` extras)
+- [ ] **PF5** — `asyncio_mode` configurado em `pyproject.toml` ou `pytest.ini` se o projeto usa `pytest-asyncio`
+- [ ] **PF6** — Docstrings que descrevem contratos (campos de log, backoff, fluxos) conferem com o código real
+
+**7. Cleanliness (CL1–CL5)** — ver `rules/cleanliness.md`
 - [ ] **CL1** — Sem funções, variáveis ou imports não referenciados
 - [ ] **CL2** — Sem blocos de código comentados
 - [ ] **CL3** — Sem abstrações para casos de uso inexistentes no PRD
@@ -150,7 +186,7 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 > ✅ Epic N aprovada para PR.
 > Requisitos: [N] FRs cobertos ✅
 > CI: lint ✅ | typecheck ✅ | tests ✅
-> Rules: complexity ✅ | testing ✅ | security ✅ | cleanliness ✅
+> Rules: complexity ✅ | testing ✅ | security ✅ | stack-specific ✅ | cleanliness ✅
 
 Execute o push da branch e abra o PR:
 
@@ -179,7 +215,7 @@ Lint: ✅ | Typecheck: ✅ | Tests: ✅ ([N] passando)
 
 ### Rules Status
 Complexity (C1–C6): ✅ | Testing (T1–T6): ✅
-Security (S1–S5): ✅ | Cleanliness (CL1–CL5): ✅
+Security (S1–S5): ✅ | Stack-Specific (PF1–PF6): ✅ | Cleanliness (CL1–CL5): ✅
 
 ### Review Notes
 [Decisões tomadas, trade-offs, tech debt registrado]

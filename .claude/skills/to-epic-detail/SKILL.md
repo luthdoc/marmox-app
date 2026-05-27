@@ -100,6 +100,16 @@ O sub-agente deve receber como contexto:
 - Auth, logging, error handling, monitoring: fluem pelas Stories desde o início
 - Nunca crie uma Story "adicionar logging" no final — incorpore ao comportamento esperado das Stories relevantes
 
+**NFRs do PRD → ACs obrigatórios:**
+Antes de escrever os ACs de cada Story, releia todos os NFRs do `docs/prd.md` e verifique quais têm implicação técnica na story em questão. Para cada NFR relevante, crie um AC explícito na story — nunca deixe o NFR apenas como Technical Note.
+
+Exemplos de mapeamento obrigatório:
+- Story que faz queries ao banco → AC explícito: "Antes de qualquer query, `set_tenant_context(tenant_id)` é chamado com o tenant_id correto, garantindo enforcement de RLS (NFR de isolamento)"
+- Story que recebe input externo → AC explícito: "Todo campo de input externo é validado antes de ser processado (formato, tipo, limites)"
+- Story que retorna dados ao cliente → AC explícito: "Response contém apenas os campos necessários — nenhum dado interno ou de outro tenant é exposto"
+
+Technical Notes são contexto de implementação, não contrato. O AC é o único input que o agente `dev` usa como contrato — se o NFR não virar AC, não será implementado nem testado.
+
 ---
 
 ## Estrutura de Diretórios
