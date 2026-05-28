@@ -195,18 +195,22 @@ def _make_webhook_mock_supabase(tenant_id: str = "tenant-uuid-123"):
 
 
 def _post_valid_webhook(mock_supabase):
-    """Dispara POST /webhook/whatsapp com payload e token válidos."""
+    """Dispara POST /webhook/whatsapp com payload e token válidos.
+
+    Usa `with TestClient` para garantir que tasks fire-and-forget do event loop
+    completem antes de sair do contexto (evita contaminação entre testes).
+    """
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
     ):
-        client = TestClient(_make_app(), raise_server_exceptions=False)
-        client.post(
-            "/webhook/whatsapp",
-            json=VALID_PAYLOAD,
-            headers={"X-Zapi-Token": VALID_TOKEN},
-        )
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=VALID_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
 
 
 def test_webhook_inserts_into_messages_table_when_tenant_found():
@@ -270,12 +274,12 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context") as mock_set_ctx,
     ):
-        client = TestClient(_make_app(), raise_server_exceptions=False)
-        client.post(
-            "/webhook/whatsapp",
-            json=VALID_PAYLOAD,
-            headers={"X-Zapi-Token": VALID_TOKEN},
-        )
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=VALID_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
 
     mock_set_ctx.assert_called_once_with(tenant_id)
 

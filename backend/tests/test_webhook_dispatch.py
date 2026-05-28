@@ -58,29 +58,23 @@ def _make_supabase_mock(tenant_status: str, tenant_id: str = "tenant-uuid-active
 
 
 def test_active_tenant_dispatches_to_agent():
-    """Tenant ativo deve resultar em chamada a process_message do agent_service."""
+    """Tenant ativo deve agendar _dispatch_agent com parâmetros corretos."""
     tenant_id = "tenant-active-001"
     tenant_name = "Marmoraria Silva"
     mock_supabase = _make_supabase_mock(
         tenant_status="active", tenant_id=tenant_id, tenant_name=tenant_name
     )
+    dispatched_calls: list = []
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch(
-            "services.webhook_service.get_or_create_lead",
-            return_value={"id": "lead-active-001", "tenant_id": tenant_id, "phone": ACTIVE_TENANT_PAYLOAD["phone"], "status": "new"},
-        ),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.persist_outbound_message"),
-        patch(
-            "services.webhook_service.process_message",
+            "services.webhook_service._dispatch_agent",
             new_callable=AsyncMock,
-            return_value="Olá! Como posso ajudar?",
-        ) as mock_process,
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
+            side_effect=lambda *a, **kw: dispatched_calls.append((a, kw)) or None,
+        ),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
             client.post(
@@ -89,13 +83,12 @@ def test_active_tenant_dispatches_to_agent():
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
 
-        mock_process.assert_called_once_with(
-            tenant_id=tenant_id,
-            tenant_name=tenant_name,
-            phone=ACTIVE_TENANT_PAYLOAD["phone"],
-            text=ACTIVE_TENANT_PAYLOAD["text"]["message"],
-            history=[],
-        )
+    assert len(dispatched_calls) == 1
+    args, _ = dispatched_calls[0]
+    assert args[0] == tenant_id
+    assert args[1] == tenant_name
+    assert args[2] == ACTIVE_TENANT_PAYLOAD["phone"]
+    assert args[3] == ACTIVE_TENANT_PAYLOAD["text"]["message"]
 
 
 # ---------------------------------------------------------------------------
