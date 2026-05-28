@@ -295,6 +295,10 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
 
     with (
         patch(
+            "services.webhook_service.get_or_create_lead",
+            return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
+        ),
+        patch(
             "services.webhook_service.load_conversation_history",
             return_value=history,
         ) as mock_load,
@@ -329,6 +333,10 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
     """_dispatch_agent deve persistir a resposta outbound após send_message bem-sucedido."""
     with (
         patch(
+            "services.webhook_service.get_or_create_lead",
+            return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
+        ),
+        patch(
             "services.webhook_service.load_conversation_history",
             return_value=[],
         ),
@@ -350,7 +358,7 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
         tenant_id="tenant-001",
         phone="5511999999999",
         content="Resposta do agente",
-        lead_id=None,
+        lead_id="lead-001",
     )
 
 
@@ -358,6 +366,10 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
 async def test_dispatch_agent_does_not_persist_if_send_fails():
     """_dispatch_agent não deve persistir outbound se send_message falhar."""
     with (
+        patch(
+            "services.webhook_service.get_or_create_lead",
+            return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
+        ),
         patch(
             "services.webhook_service.load_conversation_history",
             return_value=[],

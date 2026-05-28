@@ -1,5 +1,5 @@
 """
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2).
+Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3).
 
 Responsabilidades:
 - Validar o token Z-API contra o esperado
@@ -9,6 +9,7 @@ Responsabilidades:
 - Disparar agente Claude Haiku (fire-and-forget) para tenants com status "active" (Story 3.1)
 - Carregar histórico de conversa e passar ao agente (Story 3.2)
 - Persistir a resposta outbound após envio bem-sucedido (Story 3.2)
+- Buscar ou criar lead antes de processar com o agente (Story 3.3)
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from functools import partial
 
 from db.client import get_client, set_tenant_context
 from db.conversation import load_conversation_history, persist_outbound_message
+from db.leads import get_or_create_lead
 from schemas.webhook import ZApiWebhookPayload
 from services.agent_service import process_message
 from services.zapi_client import send_message
@@ -182,11 +184,13 @@ async def _dispatch_agent(
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
-    Fluxo (Story 3.2):
-    1. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
-    2. Chama process_message com histórico + mensagem atual.
-    3. Envia resposta ao lead via send_message.
-    4. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
+    Fluxo (Story 3.2 + 3.3):
+    1. Busca ou cria lead via get_or_create_lead (Story 3.3).
+    2. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
+    3. Chama process_message com histórico + mensagem atual.
+    4. Envia resposta ao lead via send_message.
+    5. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido,
+       associando o lead_id retornado pelo passo 1.
 
     Args:
         tenant_id: UUID do tenant.
@@ -196,6 +200,11 @@ async def _dispatch_agent(
     """
     try:
         loop = asyncio.get_event_loop()
+        lead = await loop.run_in_executor(
+            None,
+            partial(get_or_create_lead, tenant_id, phone),
+        )
+        lead_id = lead["id"]
         history = await loop.run_in_executor(
             None,
             partial(load_conversation_history, tenant_id, phone),
@@ -215,7 +224,7 @@ async def _dispatch_agent(
                 tenant_id=tenant_id,
                 phone=phone,
                 content=response_text,
-                lead_id=None,
+                lead_id=lead_id,
             ),
         )
     except Exception as exc:

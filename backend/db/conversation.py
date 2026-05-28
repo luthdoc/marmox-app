@@ -1,11 +1,14 @@
 """
-Funções de acesso ao histórico de conversa na tabela messages (Story 3.2).
+Funções de acesso ao histórico de conversa na tabela messages (Story 3.2 + 3.3).
 
 Exporta:
 - load_conversation_history: carrega histórico de mensagens de um lead formatado para o Claude.
-- persist_outbound_message: persiste a resposta outbound do agente na tabela messages.
+- persist_outbound_message: persiste a resposta outbound do agente na tabela messages
+  e atualiza last_contact_at no lead correspondente quando lead_id é fornecido (AC 4, Story 3.3).
 """
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 from db.client import get_client, set_tenant_context
 
@@ -61,7 +64,10 @@ def persist_outbound_message(
     """Persiste a resposta outbound do agente na tabela messages.
 
     Deve ser chamada apenas após send_message retornar com sucesso —
-    se o envio falhar, não persistir (consistência simples, AC 4 Technical Notes).
+    se o envio falhar, não persistir (consistência simples, AC 4 Technical Notes Story 3.2).
+
+    Quando lead_id é fornecido, atualiza last_contact_at no lead correspondente
+    para refletir o momento do último contato (AC 4, Story 3.3).
 
     Args:
         tenant_id: UUID do tenant.
@@ -80,3 +86,6 @@ def persist_outbound_message(
             "lead_id": lead_id,
         }
     ).execute()
+    if lead_id is not None:
+        now = datetime.now(tz=timezone.utc).isoformat()
+        client.table("leads").update({"last_contact_at": now}).eq("id", lead_id).execute()

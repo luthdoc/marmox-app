@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from fastapi.testclient import TestClient
 
 
@@ -58,37 +60,43 @@ def _make_supabase_mock(tenant_status: str, tenant_id: str = "tenant-uuid-active
 # ---------------------------------------------------------------------------
 
 
-def test_active_tenant_receives_agent_response_via_send_message():
-    """Tenant ativo deve receber send_message com a resposta gerada pelo agente Claude."""
+def test_active_tenant_webhook_schedules_agent_dispatch():
+    """Tenant ativo deve agendar _dispatch_agent ao receber mensagem pelo webhook.
+
+    O dispatch é fire-and-forget — este teste verifica que a task é criada
+    com os parâmetros corretos. O comportamento de send_message dentro de
+    _dispatch_agent é coberto pelos testes de test_agent_history.py.
+    """
     tenant_id = "tenant-active-001"
-    agent_response = "Olá! Sou o assistente virtual. Como posso ajudar?"
-    mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id=tenant_id)
+    tenant_name = "Marmoraria Teste"
+    mock_supabase = _make_supabase_mock(
+        tenant_status="active", tenant_id=tenant_id, tenant_name=tenant_name
+    )
+    dispatched_calls: list = []
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.persist_outbound_message"),
         patch(
-            "services.webhook_service.process_message",
+            "services.webhook_service._dispatch_agent",
             new_callable=AsyncMock,
-            return_value=agent_response,
+            side_effect=lambda *args, **kwargs: dispatched_calls.append((args, kwargs)) or None,
         ),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
-            client.post(
+            response = client.post(
                 "/webhook/whatsapp",
                 json=ACTIVE_TENANT_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
 
-        mock_send.assert_called_once_with(
-            tenant_id,
-            ACTIVE_TENANT_PAYLOAD["phone"],
-            agent_response,
-        )
+    assert response.status_code == 200
+    assert len(dispatched_calls) == 1
+    args, _ = dispatched_calls[0]
+    assert args[0] == tenant_id
+    assert args[2] == ACTIVE_TENANT_PAYLOAD["phone"]
+    assert args[3] == ACTIVE_TENANT_PAYLOAD["text"]["message"]
 
 
 # ---------------------------------------------------------------------------

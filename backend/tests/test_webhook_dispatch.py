@@ -69,6 +69,10 @@ def test_active_tenant_dispatches_to_agent():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch(
+            "services.webhook_service.get_or_create_lead",
+            return_value={"id": "lead-active-001", "tenant_id": tenant_id, "phone": ACTIVE_TENANT_PAYLOAD["phone"], "status": "new"},
+        ),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
         patch("services.webhook_service.persist_outbound_message"),
         patch(
