@@ -69,6 +69,8 @@ def test_active_tenant_dispatches_to_agent():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
@@ -88,6 +90,7 @@ def test_active_tenant_dispatches_to_agent():
             tenant_name=tenant_name,
             phone=ACTIVE_TENANT_PAYLOAD["phone"],
             text=ACTIVE_TENANT_PAYLOAD["text"]["message"],
+            history=[],
         )
 
 
@@ -108,6 +111,8 @@ def test_onboarding_tenant_does_not_dispatch_to_agent():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,

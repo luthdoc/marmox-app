@@ -1,5 +1,5 @@
 """
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1).
+Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2).
 
 Responsabilidades:
 - Validar o token Z-API contra o esperado
@@ -7,6 +7,8 @@ Responsabilidades:
 - Persistir a mensagem inbound na tabela messages
 - Emitir logs estruturados para cada mensagem recebida
 - Disparar agente Claude Haiku (fire-and-forget) para tenants com status "active" (Story 3.1)
+- Carregar histórico de conversa e passar ao agente (Story 3.2)
+- Persistir a resposta outbound após envio bem-sucedido (Story 3.2)
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from db.client import get_client, set_tenant_context
+from db.conversation import load_conversation_history, persist_outbound_message
 from schemas.webhook import ZApiWebhookPayload
 from services.agent_service import process_message
 from services.zapi_client import send_message
@@ -179,6 +182,12 @@ async def _dispatch_agent(
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
+    Fluxo (Story 3.2):
+    1. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
+    2. Chama process_message com histórico + mensagem atual.
+    3. Envia resposta ao lead via send_message.
+    4. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
+
     Args:
         tenant_id: UUID do tenant.
         tenant_name: Nome da empresa do tenant, injetado no system prompt do agente.
@@ -186,13 +195,29 @@ async def _dispatch_agent(
         text: Texto da mensagem recebida.
     """
     try:
+        loop = asyncio.get_event_loop()
+        history = await loop.run_in_executor(
+            None,
+            partial(load_conversation_history, tenant_id, phone),
+        )
         response_text = await process_message(
             tenant_id=tenant_id,
             tenant_name=tenant_name,
             phone=phone,
             text=text,
+            history=history,
         )
         await send_message(tenant_id, phone, response_text)
+        await loop.run_in_executor(
+            None,
+            partial(
+                persist_outbound_message,
+                tenant_id=tenant_id,
+                phone=phone,
+                content=response_text,
+                lead_id=None,
+            ),
+        )
     except Exception as exc:
         logger.error(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",

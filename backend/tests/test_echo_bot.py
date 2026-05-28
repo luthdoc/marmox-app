@@ -68,6 +68,8 @@ def test_active_tenant_receives_agent_response_via_send_message():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
@@ -102,6 +104,8 @@ def test_onboarding_tenant_does_not_receive_echo():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.persist_outbound_message"),
         patch("services.webhook_service.process_message", new_callable=AsyncMock),
         patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
@@ -128,6 +132,8 @@ def test_agent_failure_does_not_affect_http_response():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,

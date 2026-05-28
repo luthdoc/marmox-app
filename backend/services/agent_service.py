@@ -26,17 +26,22 @@ async def process_message(
     tenant_name: str,
     phone: str,
     text: str,
+    history: list[dict] | None = None,
 ) -> str:
     """Processa uma mensagem inbound chamando o Claude Haiku e retorna a resposta.
 
     Injeta o nome do tenant no system prompt dinamicamente. O system prompt
     é enviado com cache_control ephemeral para habilitar prompt caching (NFR5).
+    O histórico de conversa é inserido antes da mensagem atual para que o Claude
+    tenha contexto das trocas anteriores (Story 3.2).
 
     Args:
-        tenant_id: UUID do tenant (reservado para uso futuro em histórico/dados).
+        tenant_id: UUID do tenant.
         tenant_name: Nome da empresa do tenant, injetado no system prompt.
-        phone: Número do remetente (reservado para uso futuro em histórico).
+        phone: Número do remetente.
         text: Texto da mensagem inbound a ser processada.
+        history: Mensagens anteriores no formato [{"role": "user"|"assistant", "content": "..."}].
+                 Inseridas antes da mensagem atual. None ou [] equivalem a sem histórico.
 
     Returns:
         Texto da resposta gerada pelo Claude Haiku.
@@ -46,6 +51,9 @@ async def process_message(
     """
     client = AsyncAnthropic()
     system_text = _SYSTEM_PROMPT_TEMPLATE.format(tenant_name=tenant_name)
+
+    messages = list(history) if history else []
+    messages.append({"role": "user", "content": text})
 
     response = await client.messages.create(
         model=_MODEL,
@@ -57,9 +65,7 @@ async def process_message(
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        messages=[
-            {"role": "user", "content": text},
-        ],
+        messages=messages,
     )
 
     return response.content[0].text
