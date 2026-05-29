@@ -9,37 +9,31 @@ from __future__ import annotations
 from db.client import get_client, set_tenant_context
 
 
-def get_tenant_context(tenant_id: str) -> dict:
-    """Retorna o contexto do tenant para injeção no system prompt dinâmico.
+_TENANT_CONTEXT_FIELDS = "name, services, regions, business_hours, welcome_message"
 
-    Executa set_tenant_context antes de qualquer query (NFR3 — RLS enforcement).
-    Campos vazios (None, lista vazia, string vazia) são omitidos do retorno para
-    evitar injeção de placeholders inúteis no prompt (Technical Notes).
 
-    Args:
-        tenant_id: UUID do tenant.
+def _filter_empty_fields(row: dict) -> dict:
+    """Remove campos None, lista vazia ou string vazia do row do tenant."""
+    return {k: v for k, v in row.items() if v is not None and v != [] and v != ""}
 
-    Returns:
-        Dicionário com campos não-vazios de: name, services, regions,
-        business_hours, welcome_message. Retorna {} se tenant não encontrado.
-    """
-    set_tenant_context(tenant_id)
-    client = get_client()
 
+def _query_tenant_row(client, tenant_id: str) -> dict | None:
+    """Executa SELECT do tenant; retorna o primeiro row ou None."""
     rows = (
         client.table("tenants")
-        .select("name, services, regions, business_hours, welcome_message")
+        .select(_TENANT_CONTEXT_FIELDS)
         .eq("id", tenant_id)
         .execute()
         .data
     )
+    return rows[0] if rows else None
 
-    if not rows:
+
+def get_tenant_context(tenant_id: str) -> dict:
+    """Retorna o contexto do tenant para injeção no system prompt dinâmico."""
+    set_tenant_context(tenant_id)
+    client = get_client()
+    row = _query_tenant_row(client, tenant_id)
+    if row is None:
         return {}
-
-    row = rows[0]
-    return {
-        key: value
-        for key, value in row.items()
-        if value is not None and value != [] and value != ""
-    }
+    return _filter_empty_fields(row)

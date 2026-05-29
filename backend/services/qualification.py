@@ -52,43 +52,33 @@ def parse_lead_data_block(response: str) -> tuple[dict | None, str]:
     return lead_data, clean_text
 
 
-def compute_lead_status(current_status: str, extracted: dict) -> str:
-    """Calcula o próximo status do lead com base nos dados extraídos até agora.
+def _is_locked_status(current_status: str) -> bool:
+    """Retorna True se o status é avançado demais para regredir (>= scheduled)."""
+    idx = _STATUS_PROGRESSION.index(current_status) if current_status in _STATUS_PROGRESSION else 0
+    return idx >= _STATUS_PROGRESSION.index("scheduled")
 
-    Regras de transição:
-    - "new" → "qualifying" na primeira extração com qualquer dado
-    - "qualifying" → "qualified" quando name, service_type e region estão preenchidos
-    - "qualified" → "scheduled" quando scheduled_at está preenchido (Story 3.6, AC 3)
-    - Status avançados (scheduled, handoff, cold) nunca regridem
 
-    Args:
-        current_status: Status atual do lead no banco.
-        extracted: Dados extraídos da última resposta do Claude (pode ter Nones).
+def _is_qualified_or_above(current_status: str) -> bool:
+    """Retorna True se o status é qualified ou superior."""
+    idx = _STATUS_PROGRESSION.index(current_status) if current_status in _STATUS_PROGRESSION else 0
+    return idx >= _STATUS_PROGRESSION.index("qualified")
 
-    Returns:
-        Próximo status do lead.
-    """
-    current_idx = _STATUS_PROGRESSION.index(current_status) if current_status in _STATUS_PROGRESSION else 0
 
-    # Não regredir a partir de "scheduled"
-    if current_idx >= _STATUS_PROGRESSION.index("scheduled"):
-        return current_status
-
-    # Transição qualified → scheduled quando scheduled_at presente (AC 3)
-    if current_status == "qualified" and extracted.get("scheduled_at"):
-        return "scheduled"
-
-    # Não regredir a partir de "qualified" (exceto para "scheduled" acima)
-    if current_idx >= _STATUS_PROGRESSION.index("qualified"):
-        return current_status
-
-    all_required_filled = all(extracted.get(field) for field in _REQUIRED_FOR_QUALIFIED)
-
-    if all_required_filled:
+def _next_status_from_qualifying(current_status: str, extracted: dict) -> str:
+    """Calcula transição a partir de new/qualifying com base nos dados extraídos."""
+    if all(extracted.get(field) for field in _REQUIRED_FOR_QUALIFIED):
         return "qualified"
-
-    # Qualquer extração promove de "new" para "qualifying"
     if current_status == "new":
         return "qualifying"
-
     return current_status
+
+
+def compute_lead_status(current_status: str, extracted: dict) -> str:
+    """Calcula o próximo status do lead com base nos dados extraídos até agora."""
+    if _is_locked_status(current_status):
+        return current_status
+    if current_status == "qualified" and extracted.get("scheduled_at"):
+        return "scheduled"
+    if _is_qualified_or_above(current_status):
+        return current_status
+    return _next_status_from_qualifying(current_status, extracted)

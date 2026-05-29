@@ -10,24 +10,8 @@ from __future__ import annotations
 from db.client import get_client, set_tenant_context
 
 
-def get_or_create_lead(tenant_id: str, phone: str) -> dict:
-    """Busca ou cria um lead pelo par (tenant_id, phone).
-
-    Executa set_tenant_context antes de qualquer query (NFR3 — RLS enforcement).
-    Usa padrão SELECT-then-INSERT com ON CONFLICT DO NOTHING para evitar duplicatas
-    em condições de concorrência.
-
-    Args:
-        tenant_id: UUID do tenant para enforcement de RLS.
-        phone: Número do lead (formato Z-API, ex: "5511999999999").
-
-    Returns:
-        Dicionário com os dados do lead (campos da tabela leads).
-        Se o lead não existia, retorna o registro criado com status "new".
-    """
-    set_tenant_context(tenant_id)
-    client = get_client()
-
+def _find_lead(client, tenant_id: str, phone: str) -> dict | None:
+    """Busca lead existente pelo par (tenant_id, phone); retorna row ou None."""
     rows = (
         client.table("leads")
         .select("*")
@@ -36,17 +20,25 @@ def get_or_create_lead(tenant_id: str, phone: str) -> dict:
         .execute()
         .data
     )
+    return rows[0] if rows else None
 
-    if rows:
-        return rows[0]
 
-    inserted = (
+def _insert_lead(client, tenant_id: str, phone: str) -> dict:
+    """Insere novo lead com status 'new' e retorna o registro criado."""
+    return (
         client.table("leads")
         .insert({"tenant_id": tenant_id, "phone": phone, "status": "new"})
         .execute()
-        .data
+        .data[0]
     )
-    return inserted[0]
+
+
+def get_or_create_lead(tenant_id: str, phone: str) -> dict:
+    """Busca ou cria um lead pelo par (tenant_id, phone)."""
+    set_tenant_context(tenant_id)
+    client = get_client()
+    existing = _find_lead(client, tenant_id, phone)
+    return existing if existing is not None else _insert_lead(client, tenant_id, phone)
 
 
 def update_lead_qualification(lead_id: str, tenant_id: str, data: dict) -> None:

@@ -97,47 +97,14 @@ def _persist_inbound_message(
     client.table("messages").insert(row).execute()
 
 
-def _log_invalid_phone(msg: InboundMessage) -> None:
-    """Loga aviso de mensagem descartada por phone em formato inválido."""
-    logger.warning(
-        "Mensagem descartada — phone com formato inválido",
-        extra={"tenant_id": msg.tenant_id, "phone": msg.phone},
-    )
-
-
-def _log_inbound_received(msg: InboundMessage) -> None:
-    """Loga recebimento de mensagem inbound."""
-    logger.info(
-        "Mensagem inbound recebida",
-        extra={
-            "tenant_id": msg.tenant_id,
-            "phone": msg.phone,
-            "message_length": len(msg.text),
-            "instance_id": msg.instance_id,
-        },
-    )
-
-
-async def _persist_message_async(msg: InboundMessage) -> None:
-    """Persiste a mensagem inbound de forma assíncrona via run_in_executor."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None,
-        partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text, media_url=msg.image_url),
-    )
-
-
 async def _handle_inbound_message(msg: InboundMessage) -> None:
-    """Loga, persiste mensagem inbound (texto ou imagem) e dispara agente se tenant ativo.
-
-    Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
-    Quando msg.image_url está presente, persiste media_url e despacha para Sonnet (Story 3.5).
-    """
+    """Loga, persiste mensagem inbound e dispara agente se tenant ativo."""
     if not _is_valid_phone(msg.phone):
-        _log_invalid_phone(msg)
+        logger.warning("Mensagem descartada — phone inválido", extra={"tenant_id": msg.tenant_id, "phone": msg.phone})
         return
-    _log_inbound_received(msg)
-    await _persist_message_async(msg)
+    logger.info("Mensagem inbound recebida", extra={"tenant_id": msg.tenant_id, "phone": msg.phone, "message_length": len(msg.text), "instance_id": msg.instance_id})
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text, media_url=msg.image_url))
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(
             _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
@@ -230,6 +197,56 @@ async def process_inbound_message(
     return {"received": True}
 
 
+async def _call_agent(
+    *,
+    tenant_id: str,
+    tenant_name: str,
+    phone: str,
+    text: str,
+    image_url: str | None,
+    lead: dict,
+    tenant_context: dict,
+    history: list[dict],
+) -> str:
+    """Chama process_message com o modelo selecionado e retorna resposta bruta."""
+    model = _select_model(text, image_url)
+    return await process_message(
+        tenant_id=tenant_id,
+        tenant_name=tenant_name,
+        phone=phone,
+        text=text,
+        history=history,
+        tenant_context=tenant_context,
+        lead_data=lead,
+        image_url=image_url,
+        model=model,
+    )
+
+
+async def _handle_agent_response(
+    *,
+    tenant_id: str,
+    phone: str,
+    lead: dict,
+    raw_response: str,
+) -> None:
+    """Envia resposta limpa, persiste outbound e aplica atualizações de lead."""
+    has_escalation = contains_escalation_sentinel(raw_response)
+    lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
+    clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
+    await send_message(tenant_id, phone, clean_response)
+    loop = asyncio.get_event_loop()
+    lead_id = lead["id"]
+    await loop.run_in_executor(
+        None,
+        partial(persist_outbound_message, tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=lead_id),
+    )
+    if lead_data_extracted is not None:
+        await _apply_lead_update_and_notify(lead_id, tenant_id, loop=loop, lead=lead, lead_data_extracted=lead_data_extracted)
+    if has_escalation:
+        asyncio.create_task(notify_owner_escalation(tenant_id, lead_id, phone))
+
+
 async def _dispatch_agent(
     tenant_id: str,
     tenant_name: str,
@@ -241,32 +258,12 @@ async def _dispatch_agent(
     """Fire-and-forget: processa mensagem com Claude e envia resposta."""
     try:
         lead, tenant_context, history = await _fetch_dispatch_context(tenant_id, phone)
-        lead_id = lead["id"]
-        model = _select_model(text, image_url)
-        raw_response = await process_message(
-            tenant_id=tenant_id,
-            tenant_name=tenant_name,
-            phone=phone,
-            text=text,
-            history=history,
-            tenant_context=tenant_context,
-            lead_data=lead,
-            image_url=image_url,
-            model=model,
+        raw_response = await _call_agent(
+            tenant_id=tenant_id, tenant_name=tenant_name, phone=phone,
+            text=text, image_url=image_url, lead=lead,
+            tenant_context=tenant_context, history=history,
         )
-        has_escalation = contains_escalation_sentinel(raw_response)
-        lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
-        clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
-        await send_message(tenant_id, phone, clean_response)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            partial(persist_outbound_message, tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=lead_id),
-        )
-        if lead_data_extracted is not None:
-            await _apply_lead_update_and_notify(lead_id, tenant_id, loop=loop, lead=lead, lead_data_extracted=lead_data_extracted)
-        if has_escalation:
-            asyncio.create_task(notify_owner_escalation(tenant_id, lead_id, phone))
+        await _handle_agent_response(tenant_id=tenant_id, phone=phone, lead=lead, raw_response=raw_response)
     except Exception as exc:
         logger.error(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",
