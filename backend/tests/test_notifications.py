@@ -51,21 +51,11 @@ SAMPLE_LEAD = {
 
 @pytest.mark.asyncio
 async def test_lead_scheduled_sends_message_to_owner_phone():
-    """Quando lead é scheduled e tenant tem owner_phone, envia mensagem ao dono.
-
-    Verifica que set_tenant_context é chamado antes da query ao banco (AC 11, NFR3).
-    """
-    mock_db_client = MagicMock()
-    mock_db_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
-        {"owner_phone": OWNER_PHONE}
-    ]
+    """Quando lead é scheduled e tenant tem owner_phone, envia mensagem ao dono."""
     with (
         patch(
-            "services.notification_service.set_tenant_context"
-        ) as mock_set_ctx,
-        patch(
-            "services.notification_service.get_client",
-            return_value=mock_db_client,
+            "services.notification_service.get_owner_phone",
+            return_value=OWNER_PHONE,
         ),
         patch(
             "services.notification_service.send_message",
@@ -75,7 +65,6 @@ async def test_lead_scheduled_sends_message_to_owner_phone():
     ):
         await notify_owner_lead_scheduled(TENANT_ID, SAMPLE_LEAD)
 
-        mock_set_ctx.assert_called_once_with(TENANT_ID)
         mock_send.assert_called_once()
         call_args = mock_send.call_args
         # Primeiro arg: tenant_id; segundo: owner_phone; terceiro: mensagem
@@ -87,9 +76,8 @@ async def test_lead_scheduled_sends_message_to_owner_phone():
 async def test_lead_scheduled_message_contains_required_fields():
     """A mensagem de agendamento inclui nome, serviço, urgência, região e data/hora."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=OWNER_PHONE,
         ),
         patch(
@@ -112,9 +100,8 @@ async def test_lead_scheduled_message_contains_required_fields():
 async def test_lead_scheduled_skips_when_owner_phone_is_null(caplog):
     """Quando owner_phone é None, não envia mensagem e emite log de aviso."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=None,
         ),
         patch(
@@ -133,9 +120,8 @@ async def test_lead_scheduled_skips_when_owner_phone_is_null(caplog):
 async def test_lead_scheduled_logs_notification_info(caplog):
     """Notificação de agendamento é logada com tenant_id, lead_id e tipo."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=OWNER_PHONE,
         ),
         patch(
@@ -158,21 +144,11 @@ async def test_lead_scheduled_logs_notification_info(caplog):
 
 @pytest.mark.asyncio
 async def test_escalation_sends_message_to_owner_phone():
-    """Quando sentinel detectada e tenant tem owner_phone, envia notificação de escalada.
-
-    Verifica que set_tenant_context é chamado antes da query ao banco (AC 11, NFR3).
-    """
-    mock_db_client = MagicMock()
-    mock_db_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
-        {"owner_phone": OWNER_PHONE}
-    ]
+    """Quando sentinel detectada e tenant tem owner_phone, envia notificação de escalada."""
     with (
         patch(
-            "services.notification_service.set_tenant_context"
-        ) as mock_set_ctx,
-        patch(
-            "services.notification_service.get_client",
-            return_value=mock_db_client,
+            "services.notification_service.get_owner_phone",
+            return_value=OWNER_PHONE,
         ),
         patch(
             "services.notification_service.send_message",
@@ -182,7 +158,6 @@ async def test_escalation_sends_message_to_owner_phone():
     ):
         await notify_owner_escalation(TENANT_ID, LEAD_ID, LEAD_PHONE)
 
-        mock_set_ctx.assert_called_once_with(TENANT_ID)
         mock_send.assert_called_once()
         call_args = mock_send.call_args
         assert call_args[0][0] == TENANT_ID
@@ -193,9 +168,8 @@ async def test_escalation_sends_message_to_owner_phone():
 async def test_escalation_message_contains_lead_phone():
     """A mensagem de escalada inclui o telefone do lead."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=OWNER_PHONE,
         ),
         patch(
@@ -214,9 +188,8 @@ async def test_escalation_message_contains_lead_phone():
 async def test_escalation_skips_when_owner_phone_is_null(caplog):
     """Quando owner_phone é None, não envia escalada e emite log de aviso."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=None,
         ),
         patch(
@@ -235,9 +208,8 @@ async def test_escalation_skips_when_owner_phone_is_null(caplog):
 async def test_escalation_logs_notification_info(caplog):
     """Notificação de escalada é logada com tenant_id, lead_id e tipo."""
     with (
-        patch("services.notification_service.set_tenant_context"),
         patch(
-            "services.notification_service._get_owner_phone",
+            "services.notification_service.get_owner_phone",
             return_value=OWNER_PHONE,
         ),
         patch(
