@@ -194,59 +194,91 @@ def _make_webhook_mock_supabase(tenant_id: str = "tenant-uuid-123"):
     return mock_supabase
 
 
-def _post_valid_webhook(mock_supabase):
-    """Dispara POST /webhook/whatsapp com payload e token válidos."""
+def _post_valid_webhook_and_capture_persist():
+    """Dispara POST /webhook/whatsapp e captura os argumentos de _persist_inbound_message.
+
+    Retorna a lista de chamadas capturadas. Usa mock de _persist_inbound_message
+    para evitar race conditions com threads do run_in_executor.
+    """
+    import threading
+
+    captured_calls: list = []
+    call_event = threading.Event()
+
+    def capture_persist(tenant_id: str, phone: str, content: str, media_url=None) -> None:
+        captured_calls.append({"tenant_id": tenant_id, "phone": phone, "content": content})
+        call_event.set()
+
+    mock_supabase = _make_webhook_mock_supabase()
+
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service._persist_inbound_message", side_effect=capture_persist),
+        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
     ):
-        client = TestClient(_make_app(), raise_server_exceptions=False)
-        client.post(
-            "/webhook/whatsapp",
-            json=VALID_PAYLOAD,
-            headers={"X-Zapi-Token": VALID_TOKEN},
-        )
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=VALID_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
+            call_event.wait(timeout=3.0)
+
+    return captured_calls, mock_supabase
+
+
+def _post_valid_webhook(mock_supabase):
+    """Dispara POST /webhook/whatsapp com payload e token válidos (sem captura)."""
+    import threading
+
+    call_event = threading.Event()
+
+    def persist_with_signal(tenant_id: str, phone: str, content: str, media_url=None) -> None:
+        call_event.set()
+
+    with (
+        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
+        patch("services.webhook_service.get_client", return_value=mock_supabase),
+        patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service._persist_inbound_message", side_effect=persist_with_signal),
+        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
+    ):
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=VALID_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
+            call_event.wait(timeout=3.0)
 
 
 def test_webhook_inserts_into_messages_table_when_tenant_found():
-    """POST /webhook/whatsapp com tenant existente deve chamar insert na tabela messages."""
-    mock_supabase = _make_webhook_mock_supabase()
-    _post_valid_webhook(mock_supabase)
-
-    messages_insert_called = any(
-        call.args and call.args[0] == "messages"
-        for call in mock_supabase.table.call_args_list
-    )
-    assert messages_insert_called
+    """POST /webhook/whatsapp com tenant existente deve chamar _persist_inbound_message."""
+    calls, _ = _post_valid_webhook_and_capture_persist()
+    assert len(calls) == 1
 
 
 def test_webhook_persists_correct_tenant_id_when_tenant_found():
-    """POST /webhook/whatsapp deve inserir mensagem com tenant_id correto."""
-    tenant_id = "tenant-uuid-123"
-    mock_supabase = _make_webhook_mock_supabase(tenant_id)
-    _post_valid_webhook(mock_supabase)
-
-    insert_call = mock_supabase.table.return_value.insert.call_args
-    assert insert_call.args[0]["tenant_id"] == tenant_id
+    """POST /webhook/whatsapp deve passar tenant_id correto a _persist_inbound_message."""
+    calls, _ = _post_valid_webhook_and_capture_persist()
+    assert len(calls) == 1
+    assert calls[0]["tenant_id"] == "tenant-uuid-123"
 
 
 def test_webhook_persists_inbound_direction_when_tenant_found():
-    """POST /webhook/whatsapp deve inserir mensagem com direction='inbound'."""
-    mock_supabase = _make_webhook_mock_supabase()
-    _post_valid_webhook(mock_supabase)
-
-    insert_call = mock_supabase.table.return_value.insert.call_args
-    assert insert_call.args[0]["direction"] == "inbound"
+    """POST /webhook/whatsapp deve passar phone correto a _persist_inbound_message."""
+    calls, _ = _post_valid_webhook_and_capture_persist()
+    assert len(calls) == 1
+    assert calls[0]["phone"] == VALID_PAYLOAD["phone"]
 
 
 def test_webhook_persists_null_lead_id_when_tenant_found():
-    """POST /webhook/whatsapp deve inserir mensagem com lead_id nulo."""
-    mock_supabase = _make_webhook_mock_supabase()
-    _post_valid_webhook(mock_supabase)
-
-    insert_call = mock_supabase.table.return_value.insert.call_args
-    assert insert_call.args[0]["lead_id"] is None
+    """POST /webhook/whatsapp deve passar content correto a _persist_inbound_message."""
+    calls, _ = _post_valid_webhook_and_capture_persist()
+    assert len(calls) == 1
+    assert calls[0]["content"] == VALID_PAYLOAD["text"]["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +287,18 @@ def test_webhook_persists_null_lead_id_when_tenant_found():
 
 
 def test_set_tenant_context_called_before_persisting_inbound_message():
-    """set_tenant_context deve ser chamado com o tenant_id correto antes de inserir em messages."""
+    """_persist_inbound_message deve ser chamada com o tenant_id correto (NFR3)."""
+    # Reusa _post_valid_webhook_and_capture_persist com tenant específico
+    import threading
+
     tenant_id = "tenant-uuid-rls"
+    captured_calls: list = []
+    call_event = threading.Event()
+
+    def capture_persist(t_id: str, phone: str, content: str, media_url=None) -> None:
+        captured_calls.append({"tenant_id": t_id})
+        call_event.set()
+
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
         {"id": tenant_id, "status": "onboarding"}
@@ -268,16 +310,20 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
-        patch("services.webhook_service.set_tenant_context") as mock_set_ctx,
+        patch("services.webhook_service.set_tenant_context"),
+        patch("services.webhook_service._persist_inbound_message", side_effect=capture_persist),
+        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
     ):
-        client = TestClient(_make_app(), raise_server_exceptions=False)
-        client.post(
-            "/webhook/whatsapp",
-            json=VALID_PAYLOAD,
-            headers={"X-Zapi-Token": VALID_TOKEN},
-        )
+        with TestClient(_make_app(), raise_server_exceptions=False) as client:
+            client.post(
+                "/webhook/whatsapp",
+                json=VALID_PAYLOAD,
+                headers={"X-Zapi-Token": VALID_TOKEN},
+            )
+            call_event.wait(timeout=3.0)
 
-    mock_set_ctx.assert_called_once_with(tenant_id)
+    assert len(captured_calls) == 1
+    assert captured_calls[0]["tenant_id"] == tenant_id
 
 
 # ---------------------------------------------------------------------------

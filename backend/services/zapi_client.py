@@ -46,36 +46,34 @@ def _parse_tenant_credentials(row: dict) -> tuple[str, str]:
     return instance_id, token
 
 
-def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
-    """Retorna as credenciais Z-API do tenant, usando cache de 30s.
-
-    Args:
-        tenant_id: UUID do tenant.
-
-    Returns:
-        TenantCredentials com instance_id e token, ou None se não encontrado.
-    """
-    now = time.monotonic()
+def _lookup_cached_credentials(tenant_id: str, now: float) -> TenantCredentials | None:
+    """Retorna credenciais do cache se ainda válidas; None caso contrário."""
     cached = _tenant_credential_cache.get(tenant_id)
     if cached is not None:
         instance_id, token, cached_at = cached
         if now - cached_at < _CACHE_TTL_SECONDS:
             return {"zapi_instance_id": instance_id, "zapi_token": token}
+    return None
 
+
+def _fetch_and_cache_credentials(tenant_id: str, now: float) -> TenantCredentials | None:
+    """Busca credenciais no banco, armazena no cache e retorna; None se não encontrado."""
     client = get_client()
-    tenant_query = (
-        client.table("tenants")
-        .select("zapi_instance_id, zapi_token")
-        .eq("id", tenant_id)
-        .execute()
-    )
-
-    if not tenant_query.data:
+    result = client.table("tenants").select("zapi_instance_id, zapi_token").eq("id", tenant_id).execute()
+    if not result.data:
         return None
-
-    instance_id, token = _parse_tenant_credentials(tenant_query.data[0])
+    instance_id, token = _parse_tenant_credentials(result.data[0])
     _tenant_credential_cache[tenant_id] = (instance_id, token, now)
     return {"zapi_instance_id": instance_id, "zapi_token": token}
+
+
+def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
+    """Retorna as credenciais Z-API do tenant, usando cache de 30s."""
+    now = time.monotonic()
+    cached = _lookup_cached_credentials(tenant_id, now)
+    if cached is not None:
+        return cached
+    return _fetch_and_cache_credentials(tenant_id, now)
 
 
 # ---------------------------------------------------------------------------
