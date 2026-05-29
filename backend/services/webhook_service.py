@@ -1,5 +1,5 @@
 """
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3).
+Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3 + 3.4).
 
 Responsabilidades:
 - Validar o token Z-API contra o esperado
@@ -10,6 +10,8 @@ Responsabilidades:
 - Carregar histórico de conversa e passar ao agente (Story 3.2)
 - Persistir a resposta outbound após envio bem-sucedido (Story 3.2)
 - Buscar ou criar lead antes de processar com o agente (Story 3.3)
+- Injetar contexto completo do tenant no agente (Story 3.4)
+- Parsear bloco [DADOS_LEAD] da resposta e atualizar qualificação do lead (Story 3.4)
 """
 from __future__ import annotations
 
@@ -21,9 +23,11 @@ from functools import partial
 
 from db.client import get_client, set_tenant_context
 from db.conversation import load_conversation_history, persist_outbound_message
-from db.leads import get_or_create_lead
+from db.leads import get_or_create_lead, update_lead_qualification
+from db.tenants import get_tenant_context
 from schemas.webhook import ZApiWebhookPayload
 from services.agent_service import process_message
+from services.qualification import compute_lead_status, parse_lead_data_block
 from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
@@ -184,13 +188,15 @@ async def _dispatch_agent(
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
-    Fluxo (Story 3.2 + 3.3):
+    Fluxo (Story 3.2 + 3.3 + 3.4):
     1. Busca ou cria lead via get_or_create_lead (Story 3.3).
-    2. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
-    3. Chama process_message com histórico + mensagem atual.
-    4. Envia resposta ao lead via send_message.
-    5. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido,
-       associando o lead_id retornado pelo passo 1.
+    2. Carrega contexto do tenant via get_tenant_context (Story 3.4).
+    3. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
+    4. Chama process_message com histórico + contexto do tenant + lead atual.
+    5. Parseia bloco [DADOS_LEAD] da resposta bruta (Story 3.4).
+    6. Envia ao lead apenas o texto limpo (sem o bloco JSON) (Story 3.4, AC 8).
+    7. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
+    8. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
 
     Args:
         tenant_id: UUID do tenant.
@@ -205,28 +211,48 @@ async def _dispatch_agent(
             partial(get_or_create_lead, tenant_id, phone),
         )
         lead_id = lead["id"]
+        tenant_context = await loop.run_in_executor(
+            None,
+            partial(get_tenant_context, tenant_id),
+        )
         history = await loop.run_in_executor(
             None,
             partial(load_conversation_history, tenant_id, phone),
         )
-        response_text = await process_message(
+        raw_response = await process_message(
             tenant_id=tenant_id,
             tenant_name=tenant_name,
             phone=phone,
             text=text,
             history=history,
+            tenant_context=tenant_context,
+            lead_data=lead,
         )
-        await send_message(tenant_id, phone, response_text)
+        lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
+        await send_message(tenant_id, phone, clean_response)
         await loop.run_in_executor(
             None,
             partial(
                 persist_outbound_message,
                 tenant_id=tenant_id,
                 phone=phone,
-                content=response_text,
+                content=clean_response,
                 lead_id=lead_id,
             ),
         )
+        if lead_data_extracted is not None:
+            new_status = compute_lead_status(
+                lead.get("status", "new"), lead_data_extracted
+            )
+            patch_data = {
+                key: lead_data_extracted.get(key)
+                for key in ("name", "service_type", "material", "urgency", "region")
+            }
+            patch_data["status"] = new_status
+            await loop.run_in_executor(
+                None,
+                partial(update_lead_qualification, lead_id, tenant_id, patch_data),
+            )
     except Exception as exc:
         logger.error(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",

@@ -292,6 +292,7 @@ async def test_process_message_works_without_history():
 async def test_dispatch_agent_loads_history_and_passes_to_process_message():
     """_dispatch_agent deve carregar histórico e passá-lo a process_message."""
     history = [{"role": "user", "content": "Mensagem anterior"}]
+    tenant_ctx = {"name": "Marmoraria", "services": ["bancada"]}
 
     with (
         patch(
@@ -299,9 +300,13 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
         patch(
+            "services.webhook_service.get_tenant_context",
+            return_value=tenant_ctx,
+        ),
+        patch(
             "services.webhook_service.load_conversation_history",
             return_value=history,
-        ) as mock_load,
+        ),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
@@ -309,6 +314,8 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
         ) as mock_process,
         patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
+        patch("services.webhook_service.update_lead_qualification"),
     ):
         from services.webhook_service import _dispatch_agent
 
@@ -320,6 +327,8 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
         phone="5511999999999",
         text="Olá",
         history=history,
+        tenant_context=tenant_ctx,
+        lead_data={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
     )
 
 
@@ -336,6 +345,7 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
             "services.webhook_service.get_or_create_lead",
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
+        patch("services.webhook_service.get_tenant_context", return_value={}),
         patch(
             "services.webhook_service.load_conversation_history",
             return_value=[],
@@ -349,6 +359,11 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
         patch(
             "services.webhook_service.persist_outbound_message",
         ) as mock_persist,
+        patch(
+            "services.webhook_service.parse_lead_data_block",
+            return_value=(None, "Resposta do agente"),
+        ),
+        patch("services.webhook_service.update_lead_qualification"),
     ):
         from services.webhook_service import _dispatch_agent
 

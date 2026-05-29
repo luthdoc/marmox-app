@@ -36,6 +36,7 @@ async def test_dispatch_agent_calls_get_or_create_lead():
     """_dispatch_agent deve chamar get_or_create_lead com (tenant_id, phone)."""
     with (
         patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.get_tenant_context", return_value={}),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
@@ -43,6 +44,8 @@ async def test_dispatch_agent_calls_get_or_create_lead():
         ),
         patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
+        patch("services.webhook_service.update_lead_qualification"),
         patch(
             "services.webhook_service.get_or_create_lead",
             return_value=_make_lead_row(),
@@ -65,6 +68,7 @@ async def test_dispatch_agent_passes_lead_id_to_persist():
     """_dispatch_agent deve passar o lead_id retornado por get_or_create_lead ao persist_outbound_message."""
     with (
         patch("services.webhook_service.load_conversation_history", return_value=[]),
+        patch("services.webhook_service.get_tenant_context", return_value={}),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
@@ -74,6 +78,11 @@ async def test_dispatch_agent_passes_lead_id_to_persist():
         patch(
             "services.webhook_service.persist_outbound_message",
         ) as mock_persist,
+        patch(
+            "services.webhook_service.parse_lead_data_block",
+            return_value=(None, "Resposta do agente"),
+        ),
+        patch("services.webhook_service.update_lead_qualification"),
         patch(
             "services.webhook_service.get_or_create_lead",
             return_value=_make_lead_row(),

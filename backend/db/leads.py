@@ -1,8 +1,9 @@
 """
-Funções de acesso à tabela leads (Story 3.3).
+Funções de acesso à tabela leads (Stories 3.3, 3.4).
 
 Exporta:
 - get_or_create_lead: busca ou cria um lead pelo par (tenant_id, phone).
+- update_lead_qualification: atualiza campos de qualificação de um lead via PATCH.
 """
 from __future__ import annotations
 
@@ -46,3 +47,31 @@ def get_or_create_lead(tenant_id: str, phone: str) -> dict:
         .data
     )
     return inserted[0]
+
+
+def update_lead_qualification(lead_id: str, tenant_id: str, data: dict) -> None:
+    """Atualiza campos de qualificação do lead via PATCH nos campos não-None recebidos.
+
+    Executa set_tenant_context antes de qualquer query (NFR3 — RLS enforcement).
+    Campos com valor None em `data` são ignorados para não sobrescrever dados
+    já persistidos no banco (AC 6).
+
+    Args:
+        lead_id: UUID do lead a ser atualizado.
+        tenant_id: UUID do tenant para enforcement de RLS.
+        data: Dicionário com campos de qualificação. Somente campos não-None
+              são incluídos no PATCH (name, service_type, material, urgency,
+              region, status).
+    """
+    set_tenant_context(tenant_id)
+    patch_data = {key: value for key, value in data.items() if value is not None}
+    if not patch_data:
+        return
+    client = get_client()
+    (
+        client.table("leads")
+        .update(patch_data)
+        .eq("id", lead_id)
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
