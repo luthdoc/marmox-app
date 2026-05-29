@@ -105,3 +105,43 @@ async def notify_owner_escalation(
         extra={"tenant_id": tenant_id, "lead_id": lead_id, "notification_type": "escalation"},
     )
     await send_message(tenant_id, owner_phone, _format_escalation_message(lead_phone))
+
+
+def _format_cold_lead_message(lead: dict) -> str:
+    """Formata a mensagem de notificação de lead frio ao dono."""
+    name = lead.get("name") or "—"
+    phone = lead.get("phone") or "—"
+    return (
+        f"*Lead marcado como frio após duas tentativas de reengajamento.*\n\n"
+        f"*Nome:* {name}\n"
+        f"*Telefone:* {phone}\n\n"
+        f"Este lead não respondeu às mensagens automáticas e foi marcado como frio."
+    )
+
+
+async def notify_owner_lead_cold(tenant_id: str, lead: dict) -> None:
+    """Notifica dono via WhatsApp quando lead é marcado como frio (Story 4.3).
+
+    Busca owner_phone do tenant. Se ausente, loga aviso e retorna sem enviar.
+    Nunca lança exceção — a falha é absorvida com log.
+
+    Args:
+        tenant_id: UUID do tenant.
+        lead: Dicionário com dados do lead (id, name, phone).
+    """
+    owner_phone = _get_owner_phone(tenant_id)
+    if owner_phone is None:
+        logger.warning(
+            "Notificação de lead frio pulada — owner_phone ausente",
+            extra={"tenant_id": tenant_id, "lead_id": lead.get("id")},
+        )
+        return
+    logger.info(
+        "Enviando notificação de lead frio ao dono",
+        extra={
+            "tenant_id": tenant_id,
+            "lead_id": lead.get("id"),
+            "notification_type": "cold",
+        },
+    )
+    await send_message(tenant_id, owner_phone, _format_cold_lead_message(lead))
