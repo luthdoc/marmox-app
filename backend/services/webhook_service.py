@@ -10,7 +10,7 @@ from functools import partial
 from db.client import get_client, set_tenant_context
 from db.conversation import load_conversation_history, persist_outbound_message
 from db.leads import get_or_create_lead, update_lead_qualification
-from db.tenants import get_tenant_context
+from db.tenants import complete_onboarding, get_owner_phone, get_tenant_context, update_tenant_config
 from schemas.webhook import ZApiWebhookPayload
 from services.agent_service import (
     _MODEL_HAIKU,
@@ -25,12 +25,14 @@ from services.notification_service import (
     notify_owner_escalation,
     notify_owner_lead_scheduled,
 )
+from services.onboarding_service import parse_empresa_block, process_onboarding_message
 from services.qualification import compute_lead_status, parse_lead_data_block
 from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUS = "active"
+_ONBOARDING_STATUS = "onboarding"
 _PHONE_RE = re.compile(r"^\d{10,15}$")
 
 
@@ -108,6 +110,17 @@ async def _handle_inbound_message(msg: InboundMessage) -> None:
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(
             _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
+        )
+    elif msg.tenant_status == _ONBOARDING_STATUS:
+        owner_phone = await asyncio.to_thread(get_owner_phone, msg.tenant_id)
+        if owner_phone is not None and msg.phone != owner_phone:
+            logger.warning(
+                "Mensagem de onboarding descartada — phone não é do owner",
+                extra={"tenant_id": msg.tenant_id, "phone": msg.phone, "owner_phone": owner_phone},
+            )
+            return
+        asyncio.create_task(
+            _dispatch_onboarding_agent(msg.tenant_id, owner_phone, msg.text)
         )
 
 
@@ -268,4 +281,39 @@ async def _dispatch_agent(
         logger.error(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",
             extra={"tenant_id": tenant_id, "phone": phone, "error": str(exc)},
+        )
+
+
+async def _dispatch_onboarding_agent(
+    tenant_id: str,
+    owner_phone: str | None,
+    text: str,
+) -> None:
+    """Fire-and-forget: processa mensagem do dono com agente de onboarding.
+
+    Carrega histórico, chama process_onboarding_message, remove o bloco
+    [DADOS_EMPRESA] da resposta e envia o texto limpo ao dono. Se
+    onboarding_complete=True, persiste a configuração e ativa o tenant.
+    Falhas são absorvidas com log (AC8).
+    """
+    try:
+        set_tenant_context(tenant_id)
+        phone = owner_phone or ""
+        history = await asyncio.to_thread(load_conversation_history, tenant_id, phone)
+        raw_response = await process_onboarding_message(tenant_id, text, history)
+        dados, clean_response = parse_empresa_block(raw_response)
+        await send_message(tenant_id, phone, clean_response)
+        persist_outbound_message(tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=None)
+        if dados is not None and dados.get("onboarding_complete"):
+            await asyncio.to_thread(update_tenant_config, tenant_id, dados)
+            await asyncio.to_thread(complete_onboarding, tenant_id)
+            confirmation = (
+                "Configuração concluída! Seu assistente já está ativo e pronto "
+                "para atender seus clientes no WhatsApp."
+            )
+            await send_message(tenant_id, phone, confirmation)
+    except Exception as exc:
+        logger.error(
+            "Falha no dispatch de onboarding — erro ignorado (fire-and-forget)",
+            extra={"tenant_id": tenant_id, "phone": owner_phone, "error": str(exc)},
         )
