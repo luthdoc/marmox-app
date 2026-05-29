@@ -15,6 +15,20 @@ from db.client import get_client, set_tenant_context
 _DIRECTION_TO_ROLE: dict[str, str] = {"inbound": "user", "outbound": "assistant"}
 
 
+def _query_messages(client, tenant_id: str, phone: str, limit: int) -> list[dict]:
+    """Executa a query de mensagens na tabela messages e retorna os dados brutos."""
+    return (
+        client.table("messages")
+        .select("direction, content, created_at")
+        .eq("tenant_id", tenant_id)
+        .eq("phone", phone)
+        .order("created_at", desc=False)
+        .limit(limit)
+        .execute()
+        .data
+    )
+
+
 def load_conversation_history(
     tenant_id: str,
     phone: str,
@@ -36,18 +50,7 @@ def load_conversation_history(
         ordenada da mais antiga para a mais recente.
     """
     set_tenant_context(tenant_id)
-    client = get_client()
-    rows = (
-        client.table("messages")
-        .select("direction, content, created_at")
-        .eq("tenant_id", tenant_id)
-        .eq("phone", phone)
-        .order("created_at", desc=False)
-        .limit(limit)
-        .execute()
-        .data
-    )
-
+    rows = _query_messages(get_client(), tenant_id, phone, limit)
     return [
         {"role": _DIRECTION_TO_ROLE[row["direction"]], "content": row["content"]}
         for row in rows
@@ -59,6 +62,7 @@ def persist_outbound_message(
     tenant_id: str,
     phone: str,
     content: str,
+    *,
     lead_id: str | None = None,
 ) -> None:
     """Persiste a resposta outbound do agente na tabela messages.

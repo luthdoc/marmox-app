@@ -53,7 +53,7 @@ async def test_dispatch_agent_calls_get_or_create_lead():
     ):
         from services.webhook_service import _dispatch_agent
 
-        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, "Olá")
+        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
 
     mock_get_or_create.assert_called_once_with(TENANT_ID, PHONE)
 
@@ -90,7 +90,7 @@ async def test_dispatch_agent_passes_lead_id_to_persist():
     ):
         from services.webhook_service import _dispatch_agent
 
-        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, "Olá")
+        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
 
     mock_persist.assert_called_once_with(
         tenant_id=TENANT_ID,

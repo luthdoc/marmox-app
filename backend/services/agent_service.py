@@ -124,9 +124,32 @@ def _is_complex_message(text: str) -> bool:
     return any(keyword in normalized for keyword in COMPLEXITY_KEYWORDS)
 
 
+def _build_user_content(text: str, image_url: str | None) -> "str | list":
+    """Constrói o conteúdo do bloco user para o Claude.
+
+    Retorna string simples quando não há imagem; lista de blocos quando há imagem.
+    """
+    if not image_url:
+        return text
+    return [
+        {"type": "text", "text": text or ""},
+        {"type": "image", "source": {"type": "url", "url": image_url}},
+    ]
+
+
+def _build_claude_messages(
+    history: list[dict] | None, text: str, image_url: str | None
+) -> list[dict]:
+    """Monta a lista de mensagens para o Claude com histórico + mensagem atual."""
+    messages = list(history) if history else []
+    messages.append({"role": "user", "content": _build_user_content(text, image_url)})
+    return messages
+
+
 async def process_message(
     tenant_id: str,
     tenant_name: str,
+    *,
     phone: str,
     text: str = "",
     history: list[dict] | None = None,
@@ -149,7 +172,7 @@ async def process_message(
     Args:
         tenant_id: UUID do tenant.
         tenant_name: Nome da empresa do tenant, injetado no system prompt.
-        phone: Número do remetente.
+        phone: Número do remetente (keyword-only).
         text: Texto da mensagem inbound a ser processada.
         history: Mensagens anteriores no formato [{"role": "user"|"assistant", "content": "..."}].
                  Inseridas antes da mensagem atual. None ou [] equivalem a sem histórico.
@@ -168,36 +191,11 @@ async def process_message(
     """
     client = AsyncAnthropic()
     system_text = _build_system_prompt(tenant_name, tenant_context or {})
-
-    messages = list(history) if history else []
-
-    if image_url:
-        user_content: str | list = [
-            {"type": "text", "text": text} if text else {"type": "text", "text": ""},
-            {
-                "type": "image",
-                "source": {
-                    "type": "url",
-                    "url": image_url,
-                },
-            },
-        ]
-    else:
-        user_content = text
-
-    messages.append({"role": "user", "content": user_content})
-
+    messages = _build_claude_messages(history, text, image_url)
     response = await client.messages.create(
         model=model,
         max_tokens=1024,
-        system=[
-            {
-                "type": "text",
-                "text": system_text,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
+        system=[{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}],
         messages=messages,
     )
-
     return response.content[0].text

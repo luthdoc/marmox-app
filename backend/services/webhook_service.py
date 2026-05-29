@@ -95,6 +95,7 @@ def _persist_inbound_message(
     tenant_id: str,
     phone: str,
     content: str,
+    *,
     media_url: str | None = None,
 ) -> None:
     """Persiste a mensagem inbound na tabela messages (NFR3: RLS ativo via set_tenant_context).
@@ -136,6 +137,15 @@ def _log_inbound_received(msg: InboundMessage) -> None:
     )
 
 
+async def _persist_message_async(msg: InboundMessage) -> None:
+    """Persiste a mensagem inbound de forma assíncrona via run_in_executor."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text, media_url=msg.image_url),
+    )
+
+
 async def _handle_inbound_message(msg: InboundMessage) -> None:
     """Loga, persiste mensagem inbound (texto ou imagem) e dispara agente se tenant ativo.
 
@@ -146,31 +156,38 @@ async def _handle_inbound_message(msg: InboundMessage) -> None:
         _log_invalid_phone(msg)
         return
     _log_inbound_received(msg)
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None,
-        partial(
-            _persist_inbound_message,
-            msg.tenant_id,
-            msg.phone,
-            msg.text,
-            msg.image_url,
-        ),
-    )
+    await _persist_message_async(msg)
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(
-            _dispatch_agent(
-                msg.tenant_id,
-                msg.tenant_name,
-                msg.phone,
-                text=msg.text,
-                image_url=msg.image_url,
-            )
+            _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
         )
 
 
 # Alias para compatibilidade com testes existentes que patcham _handle_text_message
 _handle_text_message = _handle_inbound_message
+
+
+def _parse_message_content(payload: ZApiWebhookPayload) -> tuple[str, str | None]:
+    """Extrai (text, image_url) do payload Z-API."""
+    if payload.is_image_message:
+        caption = payload.imageMessage.caption if (payload.imageMessage and payload.imageMessage.caption) else ""  # type: ignore[union-attr]
+        return caption, payload.image_url
+    return payload.text.message, None  # type: ignore[union-attr]
+
+
+def _build_inbound_message(
+    tenant_row: dict, payload: ZApiWebhookPayload, text: str, *, image_url: str | None
+) -> InboundMessage:
+    """Constrói um InboundMessage a partir do tenant_row e payload."""
+    return InboundMessage(
+        tenant_id=tenant_row["id"],
+        tenant_status=tenant_row["status"],
+        tenant_name=tenant_row.get("name", ""),
+        phone=payload.phone,  # type: ignore[arg-type]
+        text=text,
+        instance_id=payload.instanceId,
+        image_url=image_url,
+    )
 
 
 async def process_inbound_message(
@@ -198,46 +215,63 @@ async def process_inbound_message(
         PermissionError: Se o token for ausente ou inválido.
     """
     _validate_token(received_token, expected_token)
-
-    is_processable = payload.is_text_message or payload.is_image_message
-    if not is_processable:
+    if not (payload.is_text_message or payload.is_image_message):
         return {"received": True}
-
     tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
     if tenant_row is None:
         return {"received": True}
-
-    if payload.is_image_message:
-        # is_image_message garante imageMessage.url não nulo; caption opcional como texto
-        text_content = (
-            payload.imageMessage.caption  # type: ignore[union-attr]
-            if payload.imageMessage and payload.imageMessage.caption  # type: ignore[union-attr]
-            else ""
-        )
-        image_url = payload.image_url
-    else:
-        # is_text_message garante text.message não nulo
-        text_content = payload.text.message  # type: ignore[union-attr]
-        image_url = None
-
-    msg = InboundMessage(
-        tenant_id=tenant_row["id"],
-        tenant_status=tenant_row["status"],
-        tenant_name=tenant_row.get("name", ""),
-        phone=payload.phone,  # type: ignore[arg-type]
-        text=text_content,
-        instance_id=payload.instanceId,
-        image_url=image_url,
-    )
+    text, image_url = _parse_message_content(payload)
+    msg = _build_inbound_message(tenant_row, payload, text, image_url=image_url)
     asyncio.create_task(_handle_inbound_message(msg))
-
     return {"received": True}
+
+
+async def _fetch_dispatch_context(
+    tenant_id: str, phone: str
+) -> tuple[dict, dict, list[dict]]:
+    """Carrega lead, contexto do tenant e histórico em paralelo sequencial."""
+    loop = asyncio.get_event_loop()
+    lead = await loop.run_in_executor(None, partial(get_or_create_lead, tenant_id, phone))
+    tenant_context = await loop.run_in_executor(None, partial(get_tenant_context, tenant_id))
+    history = await loop.run_in_executor(None, partial(load_conversation_history, tenant_id, phone))
+    return lead, tenant_context, history
+
+
+def _select_model(text: str, image_url: str | None) -> str:
+    """Seleciona modelo: Sonnet para imagens ou textos complexos; Haiku caso contrário."""
+    if image_url or _is_complex_message(text):
+        return _MODEL_SONNET
+    return _MODEL_HAIKU
+
+
+async def _apply_lead_update_and_notify(
+    lead_id: str,
+    tenant_id: str,
+    *,
+    loop: asyncio.AbstractEventLoop,
+    lead: dict,
+    lead_data_extracted: dict,
+) -> None:
+    """Atualiza qualificação do lead e notifica dono se status mudou para 'scheduled'."""
+    new_status = compute_lead_status(lead.get("status", "new"), lead_data_extracted)
+    patch_data = {
+        key: lead_data_extracted.get(key)
+        for key in ("name", "service_type", "material", "urgency", "region", "scheduled_at")
+    }
+    patch_data["status"] = new_status
+    await loop.run_in_executor(
+        None, partial(update_lead_qualification, lead_id, tenant_id, patch_data)
+    )
+    if new_status == "scheduled" and lead.get("status") != "scheduled":
+        updated_lead = {**lead, **{k: v for k, v in patch_data.items() if v is not None}}
+        asyncio.create_task(notify_owner_lead_scheduled(tenant_id, updated_lead))
 
 
 async def _dispatch_agent(
     tenant_id: str,
     tenant_name: str,
     phone: str,
+    *,
     text: str = "",
     image_url: str | None = None,
 ) -> None:
@@ -263,32 +297,14 @@ async def _dispatch_agent(
     Args:
         tenant_id: UUID do tenant.
         tenant_name: Nome da empresa do tenant, injetado no system prompt do agente.
-        phone: Número do remetente original.
+        phone: Número do remetente original (keyword-only).
         text: Texto da mensagem recebida (pode ser vazio para mensagens de imagem pura).
         image_url: URL da imagem, se presente. None = mensagem de texto puro (Story 3.5).
     """
     try:
-        loop = asyncio.get_event_loop()
-        lead = await loop.run_in_executor(
-            None,
-            partial(get_or_create_lead, tenant_id, phone),
-        )
+        lead, tenant_context, history = await _fetch_dispatch_context(tenant_id, phone)
         lead_id = lead["id"]
-        tenant_context = await loop.run_in_executor(
-            None,
-            partial(get_tenant_context, tenant_id),
-        )
-        history = await loop.run_in_executor(
-            None,
-            partial(load_conversation_history, tenant_id, phone),
-        )
-
-        # Seleção de modelo: Sonnet para imagens ou textos complexos (Story 3.5, AC 5, AC 6)
-        if image_url or _is_complex_message(text):
-            model = _MODEL_SONNET
-        else:
-            model = _MODEL_HAIKU
-
+        model = _select_model(text, image_url)
         raw_response = await process_message(
             tenant_id=tenant_id,
             tenant_name=tenant_name,
@@ -300,51 +316,19 @@ async def _dispatch_agent(
             image_url=image_url,
             model=model,
         )
-
-        # Detecta sentinel antes de parsear o bloco [DADOS_LEAD] (Story 3.6, AC 7)
         has_escalation = contains_escalation_sentinel(raw_response)
-
         lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
-
-        # Remove sentinel do texto limpo antes de enviar ao lead (AC 7)
         clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
-
         await send_message(tenant_id, phone, clean_response)
+        loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            partial(
-                persist_outbound_message,
-                tenant_id=tenant_id,
-                phone=phone,
-                content=clean_response,
-                lead_id=lead_id,
-            ),
+            partial(persist_outbound_message, tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=lead_id),
         )
         if lead_data_extracted is not None:
-            new_status = compute_lead_status(
-                lead.get("status", "new"), lead_data_extracted
-            )
-            patch_data = {
-                key: lead_data_extracted.get(key)
-                for key in ("name", "service_type", "material", "urgency", "region", "scheduled_at")
-            }
-            patch_data["status"] = new_status
-            await loop.run_in_executor(
-                None,
-                partial(update_lead_qualification, lead_id, tenant_id, patch_data),
-            )
-            # Notifica dono quando lead passa para "scheduled" (Story 3.6, AC 4, AC 8)
-            if new_status == "scheduled" and lead.get("status") != "scheduled":
-                updated_lead = {**lead, **{k: v for k, v in patch_data.items() if v is not None}}
-                asyncio.create_task(
-                    notify_owner_lead_scheduled(tenant_id, updated_lead)
-                )
-
-        # Notifica dono se sentinel de escalada detectada (Story 3.6, AC 6, AC 7, AC 8)
+            await _apply_lead_update_and_notify(lead_id, tenant_id, loop=loop, lead=lead, lead_data_extracted=lead_data_extracted)
         if has_escalation:
-            asyncio.create_task(
-                notify_owner_escalation(tenant_id, lead_id, phone)
-            )
+            asyncio.create_task(notify_owner_escalation(tenant_id, lead_id, phone))
     except Exception as exc:
         logger.error(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",

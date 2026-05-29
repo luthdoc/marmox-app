@@ -62,6 +62,23 @@ def contains_escalation_sentinel(response: str) -> bool:
     return ESCALATION_SENTINEL in response
 
 
+def _format_scheduled_message(lead: dict) -> str:
+    """Formata a mensagem de notificação de agendamento ao dono."""
+    name = lead.get("name") or "—"
+    service_type = lead.get("service_type") or "—"
+    urgency = lead.get("urgency") or "—"
+    region = lead.get("region") or "—"
+    scheduled_at = lead.get("scheduled_at") or "—"
+    return (
+        f"*Novo agendamento confirmado!*\n\n"
+        f"*Nome:* {name}\n"
+        f"*Serviço:* {service_type}\n"
+        f"*Urgência:* {urgency}\n"
+        f"*Região:* {region}\n"
+        f"*Data/Hora:* {scheduled_at}"
+    )
+
+
 async def notify_owner_lead_scheduled(tenant_id: str, lead: dict) -> None:
     """Notifica o dono via WhatsApp quando um lead agenda uma visita.
 
@@ -81,33 +98,21 @@ async def notify_owner_lead_scheduled(tenant_id: str, lead: dict) -> None:
             extra={"tenant_id": tenant_id, "lead_id": lead.get("id")},
         )
         return
-
-    lead_id = lead.get("id")
-    name = lead.get("name") or "—"
-    service_type = lead.get("service_type") or "—"
-    urgency = lead.get("urgency") or "—"
-    region = lead.get("region") or "—"
-    scheduled_at = lead.get("scheduled_at") or "—"
-
-    message = (
-        f"*Novo agendamento confirmado!*\n\n"
-        f"*Nome:* {name}\n"
-        f"*Serviço:* {service_type}\n"
-        f"*Urgência:* {urgency}\n"
-        f"*Região:* {region}\n"
-        f"*Data/Hora:* {scheduled_at}"
-    )
-
     logger.info(
         "Enviando notificação de agendamento ao dono",
-        extra={
-            "tenant_id": tenant_id,
-            "lead_id": lead_id,
-            "notification_type": "scheduled",
-        },
+        extra={"tenant_id": tenant_id, "lead_id": lead.get("id"), "notification_type": "scheduled"},
     )
+    await send_message(tenant_id, owner_phone, _format_scheduled_message(lead))
 
-    await send_message(tenant_id, owner_phone, message)
+
+def _format_escalation_message(lead_phone: str) -> str:
+    """Formata a mensagem de notificação de escalada ao dono."""
+    return (
+        f"*Atenção — dúvida pendente do lead!*\n\n"
+        f"O agente não soube responder uma pergunta do cliente.\n"
+        f"*Telefone do lead:* {lead_phone}\n\n"
+        f"Por favor, entre em contato para esclarecer a dúvida."
+    )
 
 
 async def notify_owner_escalation(
@@ -131,21 +136,8 @@ async def notify_owner_escalation(
             extra={"tenant_id": tenant_id, "lead_id": lead_id},
         )
         return
-
-    message = (
-        f"*Atenção — dúvida pendente do lead!*\n\n"
-        f"O agente não soube responder uma pergunta do cliente.\n"
-        f"*Telefone do lead:* {lead_phone}\n\n"
-        f"Por favor, entre em contato para esclarecer a dúvida."
-    )
-
     logger.info(
         "Enviando notificação de escalada ao dono",
-        extra={
-            "tenant_id": tenant_id,
-            "lead_id": lead_id,
-            "notification_type": "escalation",
-        },
+        extra={"tenant_id": tenant_id, "lead_id": lead_id, "notification_type": "escalation"},
     )
-
-    await send_message(tenant_id, owner_phone, message)
+    await send_message(tenant_id, owner_phone, _format_escalation_message(lead_phone))
