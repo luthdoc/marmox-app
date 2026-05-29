@@ -67,12 +67,19 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
     com os parâmetros corretos. O comportamento de send_message dentro de
     _dispatch_agent é coberto pelos testes de test_agent_history.py.
     """
+    import threading
+
     tenant_id = "tenant-active-001"
     tenant_name = "Marmoraria Teste"
     mock_supabase = _make_supabase_mock(
         tenant_status="active", tenant_id=tenant_id, tenant_name=tenant_name
     )
     dispatched_calls: list = []
+    dispatch_event = threading.Event()
+
+    async def capture_dispatch(*args, **kwargs):
+        dispatched_calls.append((args, kwargs))
+        dispatch_event.set()
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
@@ -80,8 +87,7 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
         patch("services.webhook_service.set_tenant_context"),
         patch(
             "services.webhook_service._dispatch_agent",
-            new_callable=AsyncMock,
-            side_effect=lambda *args, **kwargs: dispatched_calls.append((args, kwargs)) or None,
+            side_effect=capture_dispatch,
         ),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
@@ -90,6 +96,7 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
                 json=ACTIVE_TENANT_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
+            dispatch_event.wait(timeout=3.0)
 
     assert response.status_code == 200
     assert len(dispatched_calls) == 1

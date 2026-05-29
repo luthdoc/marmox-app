@@ -67,11 +67,15 @@ def _make_supabase_mock(tenant: dict = TENANT_ACTIVE) -> MagicMock:
 
 def test_image_message_routes_to_sonnet():
     """Payload com imageMessage deve chamar process_message com model=Sonnet e image_url."""
+    import threading
+
     mock_supabase = _make_supabase_mock()
     dispatched: list = []
+    dispatch_event = threading.Event()
 
     async def fake_dispatch(tenant_id, tenant_name, phone, text, image_url=None):
         dispatched.append({"tenant_id": tenant_id, "image_url": image_url})
+        dispatch_event.set()
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
@@ -85,6 +89,7 @@ def test_image_message_routes_to_sonnet():
                 json=IMAGE_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
+            dispatch_event.wait(timeout=3.0)
 
     assert len(dispatched) == 1
     assert dispatched[0]["image_url"] == "https://media.z-api.io/img/abc123.jpg"

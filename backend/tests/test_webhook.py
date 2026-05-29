@@ -224,7 +224,7 @@ def _post_valid_webhook_and_capture_persist():
                 json=VALID_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
-        call_event.wait(timeout=3.0)
+            call_event.wait(timeout=3.0)
 
     return captured_calls, mock_supabase
 
@@ -251,7 +251,7 @@ def _post_valid_webhook(mock_supabase):
                 json=VALID_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
-        call_event.wait(timeout=3.0)
+            call_event.wait(timeout=3.0)
 
 
 def test_webhook_inserts_into_messages_table_when_tenant_found():
@@ -320,7 +320,7 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
                 json=VALID_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
-        call_event.wait(timeout=3.0)
+            call_event.wait(timeout=3.0)
 
     assert len(captured_calls) == 1
     assert captured_calls[0]["tenant_id"] == tenant_id

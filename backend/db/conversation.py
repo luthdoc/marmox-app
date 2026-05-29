@@ -15,7 +15,7 @@ from db.client import get_client, set_tenant_context
 _DIRECTION_TO_ROLE: dict[str, str] = {"inbound": "user", "outbound": "assistant"}
 
 
-def _query_messages(client, tenant_id: str, phone: str, limit: int) -> list[dict]:
+def _query_messages(client, tenant_id: str, phone: str, *, limit: int) -> list[dict]:
     """Executa a query de mensagens na tabela messages e retorna os dados brutos."""
     return (
         client.table("messages")
@@ -34,23 +34,9 @@ def load_conversation_history(
     phone: str,
     limit: int = 20,
 ) -> list[dict]:
-    """Carrega as últimas mensagens de um lead formatadas para o Claude.
-
-    Executa set_tenant_context antes da query (NFR3 — RLS enforcement).
-    Mapeia direction→role: inbound→"user", outbound→"assistant".
-    Retorna lista vazia se não houver histórico (primeira mensagem).
-
-    Args:
-        tenant_id: UUID do tenant para enforcement de RLS.
-        phone: Número do lead (formato Z-API, ex: "5511999999999").
-        limit: Máximo de mensagens a retornar (sliding window, mais antigas descartadas).
-
-    Returns:
-        Lista de dicts no formato [{"role": "user"|"assistant", "content": "..."}],
-        ordenada da mais antiga para a mais recente.
-    """
+    """Carrega histórico de mensagens formatado para o Claude."""
     set_tenant_context(tenant_id)
-    rows = _query_messages(get_client(), tenant_id, phone, limit)
+    rows = _query_messages(get_client(), tenant_id, phone, limit=limit)
     return [
         {"role": _DIRECTION_TO_ROLE[row["direction"]], "content": row["content"]}
         for row in rows
@@ -65,20 +51,7 @@ def persist_outbound_message(
     *,
     lead_id: str | None = None,
 ) -> None:
-    """Persiste a resposta outbound do agente na tabela messages.
-
-    Deve ser chamada apenas após send_message retornar com sucesso —
-    se o envio falhar, não persistir (consistência simples, AC 4 Technical Notes Story 3.2).
-
-    Quando lead_id é fornecido, atualiza last_contact_at no lead correspondente
-    para refletir o momento do último contato (AC 4, Story 3.3).
-
-    Args:
-        tenant_id: UUID do tenant.
-        phone: Número do lead destinatário.
-        content: Texto da resposta gerada pelo agente.
-        lead_id: UUID do lead, se já existir. None se o lead ainda não foi criado.
-    """
+    """Persiste resposta outbound e atualiza last_contact_at do lead."""
     set_tenant_context(tenant_id)
     client = get_client()
     client.table("messages").insert(

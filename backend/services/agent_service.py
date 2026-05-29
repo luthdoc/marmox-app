@@ -81,18 +81,7 @@ Quando não souber responder uma pergunta do cliente, responda de forma natural 
 
 
 def _build_system_prompt(tenant_name: str, tenant_context: dict) -> str:
-    """Constrói o system prompt completo com contexto do tenant e instruções de qualificação.
-
-    Injeta somente os campos presentes no contexto (campos ausentes/vazios são omitidos).
-    O bloco de instruções de qualificação é sempre incluído.
-
-    Args:
-        tenant_name: Nome da empresa do tenant.
-        tenant_context: Dicionário retornado por get_tenant_context, com campos opcionais.
-
-    Returns:
-        System prompt completo pronto para injeção no Claude.
-    """
+    """Constrói system prompt com contexto do tenant e instruções de qualificação."""
     prompt = _SYSTEM_BASE.format(tenant_name=tenant_name)
 
     services = tenant_context.get("services")
@@ -158,37 +147,7 @@ async def process_message(
     image_url: Optional[str] = None,
     model: str = _MODEL_HAIKU,
 ) -> str:
-    """Processa uma mensagem inbound chamando o Claude e retorna a resposta bruta.
-
-    Injeta contexto completo do tenant no system prompt (AC 1, AC 2, AC 3).
-    O system prompt é enviado com cache_control ephemeral para habilitar prompt caching (NFR5).
-    O histórico de conversa é inserido antes da mensagem atual (Story 3.2).
-    Quando image_url é fornecida, constrói bloco image no payload (Story 3.5, AC 3, AC 4).
-
-    A resposta retornada é o texto bruto do Claude, que pode incluir o bloco
-    [DADOS_LEAD]...[/DADOS_LEAD]. O chamador é responsável por separar o texto
-    limpo do bloco de dados usando parse_lead_data_block (AC 8).
-
-    Args:
-        tenant_id: UUID do tenant.
-        tenant_name: Nome da empresa do tenant, injetado no system prompt.
-        phone: Número do remetente (keyword-only).
-        text: Texto da mensagem inbound a ser processada.
-        history: Mensagens anteriores no formato [{"role": "user"|"assistant", "content": "..."}].
-                 Inseridas antes da mensagem atual. None ou [] equivalem a sem histórico.
-        tenant_context: Dicionário com campos de contexto do tenant (services, regions,
-                        business_hours, welcome_message). None equivale a contexto vazio.
-        lead_data: Dados de qualificação já coletados do lead (reservado para uso futuro).
-        image_url: URL da imagem a ser enviada ao Claude via bloco image. None = sem imagem.
-        model: Identificador do modelo Claude a usar. Default: Haiku. Use Sonnet para imagens
-               ou mensagens complexas (Story 3.5, AC 6).
-
-    Returns:
-        Texto bruto da resposta gerada pelo Claude (pode conter bloco [DADOS_LEAD]).
-
-    Raises:
-        Exception: Propaga qualquer exceção da SDK Anthropic ao chamador.
-    """
+    """Chama Claude com system prompt dinâmico e retorna resposta bruta."""
     client = AsyncAnthropic()
     system_text = _build_system_prompt(tenant_name, tenant_context or {})
     messages = _build_claude_messages(history, text, image_url)

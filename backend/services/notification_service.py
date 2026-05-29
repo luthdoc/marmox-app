@@ -26,16 +26,7 @@ ESCALATION_SENTINEL = "[ESCALAR_DONO]"
 
 
 def _get_owner_phone(tenant_id: str) -> str | None:
-    """Busca o owner_phone do tenant no banco.
-
-    Executa set_tenant_context antes da query (NFR3 — RLS enforcement).
-
-    Args:
-        tenant_id: UUID do tenant.
-
-    Returns:
-        owner_phone como string, ou None se ausente ou tenant não encontrado.
-    """
+    """Busca owner_phone do tenant com RLS enforcement."""
     set_tenant_context(tenant_id)
     client = get_client()
     rows = (
@@ -51,46 +42,29 @@ def _get_owner_phone(tenant_id: str) -> str | None:
 
 
 def contains_escalation_sentinel(response: str) -> bool:
-    """Retorna True se a resposta do Claude contém a sentinel de escalada.
-
-    Args:
-        response: Texto bruto retornado pelo Claude (antes de remover a sentinel).
-
-    Returns:
-        True se ESCALATION_SENTINEL está presente, False caso contrário.
-    """
+    """Retorna True se a resposta do Claude contém a sentinel de escalada."""
     return ESCALATION_SENTINEL in response
+
+
+def _or_dash(value: object) -> str:
+    """Retorna str(value) se truthy, '—' caso contrário."""
+    return str(value) if value else "—"
 
 
 def _format_scheduled_message(lead: dict) -> str:
     """Formata a mensagem de notificação de agendamento ao dono."""
-    name = lead.get("name") or "—"
-    service_type = lead.get("service_type") or "—"
-    urgency = lead.get("urgency") or "—"
-    region = lead.get("region") or "—"
-    scheduled_at = lead.get("scheduled_at") or "—"
     return (
         f"*Novo agendamento confirmado!*\n\n"
-        f"*Nome:* {name}\n"
-        f"*Serviço:* {service_type}\n"
-        f"*Urgência:* {urgency}\n"
-        f"*Região:* {region}\n"
-        f"*Data/Hora:* {scheduled_at}"
+        f"*Nome:* {_or_dash(lead.get('name'))}\n"
+        f"*Serviço:* {_or_dash(lead.get('service_type'))}\n"
+        f"*Urgência:* {_or_dash(lead.get('urgency'))}\n"
+        f"*Região:* {_or_dash(lead.get('region'))}\n"
+        f"*Data/Hora:* {_or_dash(lead.get('scheduled_at'))}"
     )
 
 
 async def notify_owner_lead_scheduled(tenant_id: str, lead: dict) -> None:
-    """Notifica o dono via WhatsApp quando um lead agenda uma visita.
-
-    Busca owner_phone do tenant. Se ausente, emite log de aviso e retorna sem enviar.
-    A mensagem contém: nome, serviço, urgência, região e data/hora do agendamento (AC 4).
-    Registra log info com tenant_id, lead_id e tipo de notificação (AC 9).
-
-    Args:
-        tenant_id: UUID do tenant.
-        lead: Dicionário com dados do lead (id, name, service_type, urgency,
-              region, scheduled_at).
-    """
+    """Notifica dono via WhatsApp quando lead agenda visita."""
     owner_phone = _get_owner_phone(tenant_id)
     if owner_phone is None:
         logger.warning(
@@ -118,17 +92,7 @@ def _format_escalation_message(lead_phone: str) -> str:
 async def notify_owner_escalation(
     tenant_id: str, lead_id: str, lead_phone: str
 ) -> None:
-    """Notifica o dono via WhatsApp quando o agente não sabe responder uma pergunta.
-
-    Busca owner_phone do tenant. Se ausente, emite log de aviso e retorna sem enviar.
-    A mensagem indica que há uma dúvida pendente do lead (AC 6).
-    Registra log info com tenant_id, lead_id e tipo de notificação (AC 9).
-
-    Args:
-        tenant_id: UUID do tenant.
-        lead_id: UUID do lead que gerou a escalada.
-        lead_phone: Telefone do lead com dúvida pendente.
-    """
+    """Notifica dono via WhatsApp quando agente não sabe responder."""
     owner_phone = _get_owner_phone(tenant_id)
     if owner_phone is None:
         logger.warning(

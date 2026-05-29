@@ -1,20 +1,4 @@
-"""
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3 + 3.4 + 3.5).
-
-Responsabilidades:
-- Validar o token Z-API contra o esperado
-- Resolver o tenant a partir do instanceId
-- Persistir a mensagem inbound na tabela messages (com media_url para imagens, Story 3.5)
-- Emitir logs estruturados para cada mensagem recebida
-- Disparar agente Claude Haiku (fire-and-forget) para tenants com status "active" (Story 3.1)
-- Carregar histórico de conversa e passar ao agente (Story 3.2)
-- Persistir a resposta outbound após envio bem-sucedido (Story 3.2)
-- Buscar ou criar lead antes de processar com o agente (Story 3.3)
-- Injetar contexto completo do tenant no agente (Story 3.4)
-- Parsear bloco [DADOS_LEAD] da resposta e atualizar qualificação do lead (Story 3.4)
-- Rotear para Sonnet em imagens ou mensagens complexas (Story 3.5)
-- Notificar dono ao agendar visita ou ao escalar dúvida do lead (Story 3.6)
-"""
+"""Service de processamento de webhooks do Z-API."""
 from __future__ import annotations
 
 import asyncio
@@ -34,6 +18,7 @@ from services.agent_service import (
     _is_complex_message,
     process_message,
 )
+from services.dispatch_helpers import _should_notify_scheduled
 from services.notification_service import (
     ESCALATION_SENTINEL,
     contains_escalation_sentinel,
@@ -98,10 +83,6 @@ def _persist_inbound_message(
     *,
     media_url: str | None = None,
 ) -> None:
-    """Persiste a mensagem inbound na tabela messages (NFR3: RLS ativo via set_tenant_context).
-
-    Para mensagens de imagem, media_url é preenchido com a URL da imagem (Story 3.5, AC 2).
-    """
     set_tenant_context(tenant_id)
     client = get_client()
     row: dict = {
@@ -190,42 +171,6 @@ def _build_inbound_message(
     )
 
 
-async def process_inbound_message(
-    payload: ZApiWebhookPayload,
-    received_token: str | None,
-    expected_token: str,
-) -> dict:
-    """Processa uma mensagem inbound recebida via webhook do Z-API.
-
-    Valida o token recebido contra o esperado, resolve o tenant pelo instanceId
-    e persiste a mensagem quando todos os critérios forem atendidos.
-    Para tenants com status "active", dispara o agente Claude via fire-and-forget.
-    Retorna sempre {"received": True} para payloads que passaram na validação
-    de token — nunca levanta 4xx para payloads desconhecidos do Z-API.
-
-    Args:
-        payload: Payload decodificado do webhook Z-API.
-        received_token: Valor do header X-Zapi-Token recebido na requisição.
-        expected_token: Token configurado via variável de ambiente ZAPI_TOKEN.
-
-    Returns:
-        Dicionário {"received": True} para respostas de sucesso.
-
-    Raises:
-        PermissionError: Se o token for ausente ou inválido.
-    """
-    _validate_token(received_token, expected_token)
-    if not (payload.is_text_message or payload.is_image_message):
-        return {"received": True}
-    tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
-    if tenant_row is None:
-        return {"received": True}
-    text, image_url = _parse_message_content(payload)
-    msg = _build_inbound_message(tenant_row, payload, text, image_url=image_url)
-    asyncio.create_task(_handle_inbound_message(msg))
-    return {"received": True}
-
-
 async def _fetch_dispatch_context(
     tenant_id: str, phone: str
 ) -> tuple[dict, dict, list[dict]]:
@@ -262,9 +207,27 @@ async def _apply_lead_update_and_notify(
     await loop.run_in_executor(
         None, partial(update_lead_qualification, lead_id, tenant_id, patch_data)
     )
-    if new_status == "scheduled" and lead.get("status") != "scheduled":
+    if _should_notify_scheduled(new_status, lead.get("status")):
         updated_lead = {**lead, **{k: v for k, v in patch_data.items() if v is not None}}
         asyncio.create_task(notify_owner_lead_scheduled(tenant_id, updated_lead))
+
+
+async def process_inbound_message(
+    payload: ZApiWebhookPayload,
+    received_token: str | None,
+    expected_token: str,
+) -> dict:
+    """Processa webhook Z-API: valida token, resolve tenant e dispara agente."""
+    _validate_token(received_token, expected_token)
+    if not (payload.is_text_message or payload.is_image_message):
+        return {"received": True}
+    tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
+    if tenant_row is None:
+        return {"received": True}
+    text, image_url = _parse_message_content(payload)
+    msg = _build_inbound_message(tenant_row, payload, text, image_url=image_url)
+    asyncio.create_task(_handle_inbound_message(msg))
+    return {"received": True}
 
 
 async def _dispatch_agent(
@@ -275,32 +238,7 @@ async def _dispatch_agent(
     text: str = "",
     image_url: str | None = None,
 ) -> None:
-    """Processa a mensagem com o agente Claude e envia a resposta ao remetente.
-
-    Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
-    e não propagadas para não afetar o fluxo principal do webhook.
-
-    Fluxo (Story 3.2 + 3.3 + 3.4 + 3.5 + 3.6):
-    1. Busca ou cria lead via get_or_create_lead (Story 3.3).
-    2. Carrega contexto do tenant via get_tenant_context (Story 3.4).
-    3. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
-    4. Seleciona modelo: Sonnet se imagem presente ou texto complexo; Haiku caso contrário (Story 3.5).
-    5. Chama process_message com histórico + contexto + modelo + image_url opcional.
-    6. Parseia bloco [DADOS_LEAD] da resposta bruta (Story 3.4).
-    7. Remove sentinel [ESCALAR_DONO] da resposta antes de enviar ao lead (Story 3.6, AC 7).
-    8. Envia ao lead apenas o texto limpo (sem o bloco JSON e sem a sentinel) (Story 3.4, AC 8).
-    9. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
-    10. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
-    11. Dispara notificação ao dono se status mudou para "scheduled" (Story 3.6, AC 4).
-    12. Dispara notificação de escalada ao dono se sentinel detectada (Story 3.6, AC 6, AC 7).
-
-    Args:
-        tenant_id: UUID do tenant.
-        tenant_name: Nome da empresa do tenant, injetado no system prompt do agente.
-        phone: Número do remetente original (keyword-only).
-        text: Texto da mensagem recebida (pode ser vazio para mensagens de imagem pura).
-        image_url: URL da imagem, se presente. None = mensagem de texto puro (Story 3.5).
-    """
+    """Fire-and-forget: processa mensagem com Claude e envia resposta."""
     try:
         lead, tenant_context, history = await _fetch_dispatch_context(tenant_id, phone)
         lead_id = lead["id"]

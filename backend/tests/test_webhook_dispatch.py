@@ -59,12 +59,19 @@ def _make_supabase_mock(tenant_status: str, tenant_id: str = "tenant-uuid-active
 
 def test_active_tenant_dispatches_to_agent():
     """Tenant ativo deve agendar _dispatch_agent com parâmetros corretos."""
+    import threading
+
     tenant_id = "tenant-active-001"
     tenant_name = "Marmoraria Silva"
     mock_supabase = _make_supabase_mock(
         tenant_status="active", tenant_id=tenant_id, tenant_name=tenant_name
     )
     dispatched_calls: list = []
+    dispatch_event = threading.Event()
+
+    async def capture_dispatch(*a, **kw):
+        dispatched_calls.append((a, kw))
+        dispatch_event.set()
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
@@ -72,8 +79,7 @@ def test_active_tenant_dispatches_to_agent():
         patch("services.webhook_service.set_tenant_context"),
         patch(
             "services.webhook_service._dispatch_agent",
-            new_callable=AsyncMock,
-            side_effect=lambda *a, **kw: dispatched_calls.append((a, kw)) or None,
+            side_effect=capture_dispatch,
         ),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
@@ -82,6 +88,7 @@ def test_active_tenant_dispatches_to_agent():
                 json=ACTIVE_TENANT_PAYLOAD,
                 headers={"X-Zapi-Token": VALID_TOKEN},
             )
+            dispatch_event.wait(timeout=3.0)
 
     assert len(dispatched_calls) == 1
     args, kwargs = dispatched_calls[0]
