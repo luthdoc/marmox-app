@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from db.client import get_client, set_tenant_context
 from services.followup_query import (
@@ -63,13 +64,16 @@ async def send_first_followup(tenant_id: str, lead: dict) -> None:
         )
         return
 
+    await asyncio.to_thread(_update_first_followup_timestamp, tenant_id, lead["id"])
+
+
+def _update_first_followup_timestamp(tenant_id: str, lead_id: str) -> None:
+    """Record follow_up_1_sent_at = now() for the lead (sync DB write)."""
     set_tenant_context(tenant_id)
     client = get_client()
-    from datetime import datetime, timezone
-
     now_iso = datetime.now(timezone.utc).isoformat()
     client.table("leads").update({"follow_up_1_sent_at": now_iso}).eq(
-        "id", lead["id"]
+        "id", lead_id
     ).execute()
 
 
@@ -93,10 +97,15 @@ async def send_second_followup(tenant_id: str, lead: dict) -> None:
             extra={"tenant_id": tenant_id, "lead_id": lead.get("id"), "error": str(exc)},
         )
 
+    await asyncio.to_thread(_mark_lead_cold, tenant_id, lead["id"])
+    await notify_owner_lead_cold(tenant_id, lead)
+
+
+def _mark_lead_cold(tenant_id: str, lead_id: str) -> None:
+    """Update lead status to 'cold' in DB (sync DB write)."""
     set_tenant_context(tenant_id)
     client = get_client()
-    client.table("leads").update({"status": "cold"}).eq("id", lead["id"]).execute()
-    await notify_owner_lead_cold(tenant_id, lead)
+    client.table("leads").update({"status": "cold"}).eq("id", lead_id).execute()
 
 
 def _process_tenant_followups(tenant: dict) -> None:
