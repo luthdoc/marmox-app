@@ -10,7 +10,7 @@ from functools import partial
 from db.client import get_client, set_tenant_context
 from db.conversation import load_conversation_history, persist_outbound_message
 from db.leads import get_or_create_lead, update_lead_qualification
-from db.tenants import get_tenant_context
+from db.tenants import get_owner_phone, get_tenant_context
 from schemas.webhook import ZApiWebhookPayload
 from services.agent_service import (
     _MODEL_HAIKU,
@@ -25,12 +25,14 @@ from services.notification_service import (
     notify_owner_escalation,
     notify_owner_lead_scheduled,
 )
+from services.onboarding_dispatch import dispatch_onboarding_agent
 from services.qualification import compute_lead_status, parse_lead_data_block
 from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUS = "active"
+_ONBOARDING_STATUS = "onboarding"
 _PHONE_RE = re.compile(r"^\d{10,15}$")
 
 
@@ -97,6 +99,18 @@ def _persist_inbound_message(
     client.table("messages").insert(row).execute()
 
 
+async def _route_onboarding_message(msg: InboundMessage) -> None:
+    """Valida owner_phone e agenda dispatch de onboarding para o dono."""
+    owner_phone = await asyncio.to_thread(get_owner_phone, msg.tenant_id)
+    if owner_phone is not None and msg.phone != owner_phone:
+        logger.warning(
+            "Mensagem de onboarding descartada — phone não é do owner",
+            extra={"tenant_id": msg.tenant_id, "phone": msg.phone, "owner_phone": owner_phone},
+        )
+        return
+    asyncio.create_task(dispatch_onboarding_agent(msg.tenant_id, owner_phone, msg.text))
+
+
 async def _handle_inbound_message(msg: InboundMessage) -> None:
     """Loga, persiste mensagem inbound e dispara agente se tenant ativo."""
     if not _is_valid_phone(msg.phone):
@@ -109,6 +123,8 @@ async def _handle_inbound_message(msg: InboundMessage) -> None:
         asyncio.create_task(
             _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
         )
+    elif msg.tenant_status == _ONBOARDING_STATUS:
+        await _route_onboarding_message(msg)
 
 
 # Alias para compatibilidade com testes existentes que patcham _handle_text_message
@@ -269,3 +285,5 @@ async def _dispatch_agent(
             "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",
             extra={"tenant_id": tenant_id, "phone": phone, "error": str(exc)},
         )
+
+

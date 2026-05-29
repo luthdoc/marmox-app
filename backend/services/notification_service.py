@@ -5,7 +5,6 @@ Responsabilidades:
 - notify_owner_lead_scheduled: notifica o dono quando um lead agenda uma visita
 - notify_owner_escalation: notifica o dono quando o agente não sabe responder
 - contains_escalation_sentinel: detecta a sentinel [ESCALAR_DONO] na resposta do Claude
-- _get_owner_phone: busca owner_phone do tenant com set_tenant_context (NFR3)
 
 Todas as notificações são disparadas via asyncio.create_task no ponto de integração
 (dispatcher) para não bloquear o fluxo principal (AC 8).
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from db.client import get_client, set_tenant_context
+from db.tenants import get_owner_phone
 from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
@@ -23,22 +22,6 @@ logger = logging.getLogger(__name__)
 # O system prompt instrui o Claude a incluir esta string quando não sabe responder.
 # O backend detecta e dispara notificação — a sentinel não é enviada ao lead (AC 7).
 ESCALATION_SENTINEL = "[ESCALAR_DONO]"
-
-
-def _get_owner_phone(tenant_id: str) -> str | None:
-    """Busca owner_phone do tenant com RLS enforcement."""
-    set_tenant_context(tenant_id)
-    client = get_client()
-    rows = (
-        client.table("tenants")
-        .select("owner_phone")
-        .eq("id", tenant_id)
-        .execute()
-        .data
-    )
-    if not rows:
-        return None
-    return rows[0].get("owner_phone") or None
 
 
 def contains_escalation_sentinel(response: str) -> bool:
@@ -65,7 +48,7 @@ def _format_scheduled_message(lead: dict) -> str:
 
 async def notify_owner_lead_scheduled(tenant_id: str, lead: dict) -> None:
     """Notifica dono via WhatsApp quando lead agenda visita."""
-    owner_phone = _get_owner_phone(tenant_id)
+    owner_phone = get_owner_phone(tenant_id)
     if owner_phone is None:
         logger.warning(
             "Notificação de agendamento pulada — owner_phone ausente",
@@ -93,7 +76,7 @@ async def notify_owner_escalation(
     tenant_id: str, lead_id: str, lead_phone: str
 ) -> None:
     """Notifica dono via WhatsApp quando agente não sabe responder."""
-    owner_phone = _get_owner_phone(tenant_id)
+    owner_phone = get_owner_phone(tenant_id)
     if owner_phone is None:
         logger.warning(
             "Notificação de escalada pulada — owner_phone ausente",
@@ -129,7 +112,7 @@ async def notify_owner_lead_cold(tenant_id: str, lead: dict) -> None:
         tenant_id: UUID do tenant.
         lead: Dicionário com dados do lead (id, name, phone).
     """
-    owner_phone = _get_owner_phone(tenant_id)
+    owner_phone = get_owner_phone(tenant_id)
     if owner_phone is None:
         logger.warning(
             "Notificação de lead frio pulada — owner_phone ausente",
