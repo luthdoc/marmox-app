@@ -47,7 +47,7 @@ async def dispatch_onboarding_agent(
         raw_response = await process_onboarding_message(tenant_id, text, history)
         dados, clean_response = parse_empresa_block(raw_response)
         await send_message(tenant_id, phone, clean_response)
-        persist_outbound_message(tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=None)
+        await asyncio.to_thread(persist_outbound_message, tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=None)
         if dados is not None and dados.get("onboarding_complete"):
             await _activate_tenant(tenant_id, phone, dados)
     except Exception as exc:

@@ -169,6 +169,7 @@ async def test_dispatch_onboarding_activates_tenant_when_complete():
             complete_calls.append(args)
         elif fn.__name__ == "load_conversation_history":
             return []
+        # persist_outbound_message e outros: retorna None silenciosamente
         return None
 
     with (
@@ -177,7 +178,6 @@ async def test_dispatch_onboarding_activates_tenant_when_complete():
         patch("services.onboarding_dispatch.process_onboarding_message", new_callable=AsyncMock, return_value=raw_response),
         patch("services.onboarding_dispatch.parse_empresa_block", return_value=(dados_completos, clean_text)),
         patch("services.onboarding_dispatch.send_message", new_callable=AsyncMock),
-        patch("services.onboarding_dispatch.persist_outbound_message"),
     ):
         await dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Todas as infos fornecidas")
 
