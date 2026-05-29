@@ -145,8 +145,8 @@ async def test_onboarding_message_from_non_owner_phone_is_discarded(caplog):
 
 @pytest.mark.asyncio
 async def test_dispatch_onboarding_activates_tenant_when_complete():
-    """_dispatch_onboarding_agent chama update_tenant_config e complete_onboarding quando onboarding_complete=True."""
-    from services.webhook_service import _dispatch_onboarding_agent
+    """dispatch_onboarding_agent chama update_tenant_config e complete_onboarding quando onboarding_complete=True."""
+    from services.onboarding_dispatch import dispatch_onboarding_agent
 
     dados_completos = {
         "name": "Marmox",
@@ -172,14 +172,14 @@ async def test_dispatch_onboarding_activates_tenant_when_complete():
         return None
 
     with (
-        patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("services.webhook_service.process_onboarding_message", new_callable=AsyncMock, return_value=raw_response),
-        patch("services.webhook_service.parse_empresa_block", return_value=(dados_completos, clean_text)),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.onboarding_dispatch.set_tenant_context"),
+        patch("services.onboarding_dispatch.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("services.onboarding_dispatch.process_onboarding_message", new_callable=AsyncMock, return_value=raw_response),
+        patch("services.onboarding_dispatch.parse_empresa_block", return_value=(dados_completos, clean_text)),
+        patch("services.onboarding_dispatch.send_message", new_callable=AsyncMock),
+        patch("services.onboarding_dispatch.persist_outbound_message"),
     ):
-        await _dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Todas as infos fornecidas")
+        await dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Todas as infos fornecidas")
 
     assert len(update_calls) == 1, "update_tenant_config deve ser chamado uma vez"
     assert len(complete_calls) == 1, "complete_onboarding deve ser chamado uma vez"
@@ -193,7 +193,7 @@ async def test_dispatch_onboarding_activates_tenant_when_complete():
 @pytest.mark.asyncio
 async def test_dispatch_onboarding_does_not_send_block_to_owner():
     """A resposta enviada ao dono não contém o bloco [DADOS_EMPRESA]."""
-    from services.webhook_service import _dispatch_onboarding_agent
+    from services.onboarding_dispatch import dispatch_onboarding_agent
 
     dados_parciais = {
         "name": "Marmox",
@@ -217,14 +217,14 @@ async def test_dispatch_onboarding_does_not_send_block_to_owner():
         return None
 
     with (
-        patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("services.webhook_service.process_onboarding_message", new_callable=AsyncMock, return_value=raw_response),
-        patch("services.webhook_service.parse_empresa_block", return_value=(dados_parciais, clean_text)),
-        patch("services.webhook_service.send_message", side_effect=fake_send),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.onboarding_dispatch.set_tenant_context"),
+        patch("services.onboarding_dispatch.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("services.onboarding_dispatch.process_onboarding_message", new_callable=AsyncMock, return_value=raw_response),
+        patch("services.onboarding_dispatch.parse_empresa_block", return_value=(dados_parciais, clean_text)),
+        patch("services.onboarding_dispatch.send_message", side_effect=fake_send),
+        patch("services.onboarding_dispatch.persist_outbound_message"),
     ):
-        await _dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Olá")
+        await dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Olá")
 
     assert sent_messages, "send_message deve ter sido chamado"
     for msg in sent_messages:
@@ -239,15 +239,15 @@ async def test_dispatch_onboarding_does_not_send_block_to_owner():
 
 @pytest.mark.asyncio
 async def test_dispatch_onboarding_absorbs_exceptions():
-    """Falhas em _dispatch_onboarding_agent são capturadas e não propagadas."""
-    from services.webhook_service import _dispatch_onboarding_agent
+    """Falhas em dispatch_onboarding_agent são capturadas e não propagadas."""
+    from services.onboarding_dispatch import dispatch_onboarding_agent
 
     async def fake_to_thread_raises(fn, *args, **kwargs):
         raise RuntimeError("DB error")
 
     with (
-        patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.asyncio.to_thread", side_effect=fake_to_thread_raises),
+        patch("services.onboarding_dispatch.set_tenant_context"),
+        patch("services.onboarding_dispatch.asyncio.to_thread", side_effect=fake_to_thread_raises),
     ):
         # Não deve lançar exceção
-        await _dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Olá")
+        await dispatch_onboarding_agent(TENANT_ID, OWNER_PHONE, "Olá")
