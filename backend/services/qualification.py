@@ -55,10 +55,11 @@ def parse_lead_data_block(response: str) -> tuple[dict | None, str]:
 def compute_lead_status(current_status: str, extracted: dict) -> str:
     """Calcula o próximo status do lead com base nos dados extraídos até agora.
 
-    Regras de transição (AC 5):
+    Regras de transição:
     - "new" → "qualifying" na primeira extração com qualquer dado
     - "qualifying" → "qualified" quando name, service_type e region estão preenchidos
-    - Status avançados (qualified, scheduled, handoff, cold) nunca regridem
+    - "qualified" → "scheduled" quando scheduled_at está preenchido (Story 3.6, AC 3)
+    - Status avançados (scheduled, handoff, cold) nunca regridem
 
     Args:
         current_status: Status atual do lead no banco.
@@ -69,7 +70,15 @@ def compute_lead_status(current_status: str, extracted: dict) -> str:
     """
     current_idx = _STATUS_PROGRESSION.index(current_status) if current_status in _STATUS_PROGRESSION else 0
 
-    # Não regredir a partir de "qualified"
+    # Não regredir a partir de "scheduled"
+    if current_idx >= _STATUS_PROGRESSION.index("scheduled"):
+        return current_status
+
+    # Transição qualified → scheduled quando scheduled_at presente (AC 3)
+    if current_status == "qualified" and extracted.get("scheduled_at"):
+        return "scheduled"
+
+    # Não regredir a partir de "qualified" (exceto para "scheduled" acima)
     if current_idx >= _STATUS_PROGRESSION.index("qualified"):
         return current_status
 

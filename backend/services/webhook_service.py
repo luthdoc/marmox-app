@@ -13,6 +13,7 @@ Responsabilidades:
 - Injetar contexto completo do tenant no agente (Story 3.4)
 - Parsear bloco [DADOS_LEAD] da resposta e atualizar qualificação do lead (Story 3.4)
 - Rotear para Sonnet em imagens ou mensagens complexas (Story 3.5)
+- Notificar dono ao agendar visita ou ao escalar dúvida do lead (Story 3.6)
 """
 from __future__ import annotations
 
@@ -32,6 +33,12 @@ from services.agent_service import (
     _MODEL_SONNET,
     _is_complex_message,
     process_message,
+)
+from services.notification_service import (
+    ESCALATION_SENTINEL,
+    contains_escalation_sentinel,
+    notify_owner_escalation,
+    notify_owner_lead_scheduled,
 )
 from services.qualification import compute_lead_status, parse_lead_data_block
 from services.zapi_client import send_message
@@ -239,16 +246,19 @@ async def _dispatch_agent(
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
-    Fluxo (Story 3.2 + 3.3 + 3.4 + 3.5):
+    Fluxo (Story 3.2 + 3.3 + 3.4 + 3.5 + 3.6):
     1. Busca ou cria lead via get_or_create_lead (Story 3.3).
     2. Carrega contexto do tenant via get_tenant_context (Story 3.4).
     3. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
     4. Seleciona modelo: Sonnet se imagem presente ou texto complexo; Haiku caso contrário (Story 3.5).
     5. Chama process_message com histórico + contexto + modelo + image_url opcional.
     6. Parseia bloco [DADOS_LEAD] da resposta bruta (Story 3.4).
-    7. Envia ao lead apenas o texto limpo (sem o bloco JSON) (Story 3.4, AC 8).
-    8. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
-    9. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
+    7. Remove sentinel [ESCALAR_DONO] da resposta antes de enviar ao lead (Story 3.6, AC 7).
+    8. Envia ao lead apenas o texto limpo (sem o bloco JSON e sem a sentinel) (Story 3.4, AC 8).
+    9. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
+    10. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
+    11. Dispara notificação ao dono se status mudou para "scheduled" (Story 3.6, AC 4).
+    12. Dispara notificação de escalada ao dono se sentinel detectada (Story 3.6, AC 6, AC 7).
 
     Args:
         tenant_id: UUID do tenant.
@@ -290,7 +300,15 @@ async def _dispatch_agent(
             image_url=image_url,
             model=model,
         )
+
+        # Detecta sentinel antes de parsear o bloco [DADOS_LEAD] (Story 3.6, AC 7)
+        has_escalation = contains_escalation_sentinel(raw_response)
+
         lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
+
+        # Remove sentinel do texto limpo antes de enviar ao lead (AC 7)
+        clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
+
         await send_message(tenant_id, phone, clean_response)
         await loop.run_in_executor(
             None,
@@ -308,12 +326,24 @@ async def _dispatch_agent(
             )
             patch_data = {
                 key: lead_data_extracted.get(key)
-                for key in ("name", "service_type", "material", "urgency", "region")
+                for key in ("name", "service_type", "material", "urgency", "region", "scheduled_at")
             }
             patch_data["status"] = new_status
             await loop.run_in_executor(
                 None,
                 partial(update_lead_qualification, lead_id, tenant_id, patch_data),
+            )
+            # Notifica dono quando lead passa para "scheduled" (Story 3.6, AC 4, AC 8)
+            if new_status == "scheduled" and lead.get("status") != "scheduled":
+                updated_lead = {**lead, **{k: v for k, v in patch_data.items() if v is not None}}
+                asyncio.create_task(
+                    notify_owner_lead_scheduled(tenant_id, updated_lead)
+                )
+
+        # Notifica dono se sentinel de escalada detectada (Story 3.6, AC 6, AC 7, AC 8)
+        if has_escalation:
+            asyncio.create_task(
+                notify_owner_escalation(tenant_id, lead_id, phone)
             )
     except Exception as exc:
         logger.error(

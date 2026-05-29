@@ -69,8 +69,15 @@ Ao final de cada resposta, adicione obrigatoriamente o bloco abaixo com os dados
 Campos ainda não coletados devem aparecer como null. NUNCA omita o bloco.
 
 [DADOS_LEAD]
-{"name": <string|null>, "service_type": <string|null>, "material": <string|null>, "urgency": <string|null>, "region": <string|null>, "status": <"new"|"qualifying"|"qualified">}
-[/DADOS_LEAD]"""
+{"name": <string|null>, "service_type": <string|null>, "material": <string|null>, "urgency": <string|null>, "region": <string|null>, "status": <"new"|"qualifying"|"qualified"|"scheduled">, "scheduled_at": <string ISO 8601|null>}
+[/DADOS_LEAD]
+
+AGENDAMENTO DE VISITA TÉCNICA
+Quando o lead atingir status "qualified" (nome, serviço e região coletados), proponha o agendamento de uma visita técnica.
+Pergunte a preferência de data e horário do lead de forma natural. Quando o lead confirmar, preencha o campo "scheduled_at" com a data/hora acordada no formato ISO 8601 (ex: "2024-03-15T14:00:00") e atualize o status para "scheduled".
+
+ESCALADA PARA O DONO
+Quando não souber responder uma pergunta do cliente, responda de forma natural (ex: "Vou verificar com a equipe e entro em contato!") e inclua a marcação [ESCALAR_DONO] no final da resposta. NUNCA mostre a marcação [ESCALAR_DONO] ao cliente — ela é removida antes do envio. Use [ESCALAR_DONO] apenas quando realmente não souber a resposta."""
 
 
 def _build_system_prompt(tenant_name: str, tenant_context: dict) -> str:
