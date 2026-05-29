@@ -93,10 +93,10 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
 
     assert response.status_code == 200
     assert len(dispatched_calls) == 1
-    args, _ = dispatched_calls[0]
+    args, kwargs = dispatched_calls[0]
     assert args[0] == tenant_id
     assert args[2] == ACTIVE_TENANT_PAYLOAD["phone"]
-    assert args[3] == ACTIVE_TENANT_PAYLOAD["text"]["message"]
+    assert kwargs.get("text") == ACTIVE_TENANT_PAYLOAD["text"]["message"]
 
 
 # ---------------------------------------------------------------------------

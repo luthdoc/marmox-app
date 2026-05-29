@@ -319,7 +319,7 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
     ):
         from services.webhook_service import _dispatch_agent
 
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", "Olá")
+        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_process.assert_called_once_with(
         tenant_id="tenant-001",
@@ -329,6 +329,8 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
         history=history,
         tenant_context=tenant_ctx,
         lead_data={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
+        image_url=None,
+        model="claude-haiku-4-5-20251001",
     )
 
 
@@ -367,7 +369,7 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
     ):
         from services.webhook_service import _dispatch_agent
 
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", "Olá")
+        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_persist.assert_called_once_with(
         tenant_id="tenant-001",
@@ -406,6 +408,6 @@ async def test_dispatch_agent_does_not_persist_if_send_fails():
         from services.webhook_service import _dispatch_agent
 
         # fire-and-forget não propaga — mas internamente deve capturar antes de persist
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", "Olá")
+        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_persist.assert_not_called()

@@ -1,17 +1,45 @@
 """
-Serviço do agente Claude Haiku para processamento de mensagens (Story 3.1 + 3.4).
+Serviço do agente Claude para processamento de mensagens (Story 3.1 + 3.4 + 3.5).
 
 Responsabilidades:
-- Receber texto de uma mensagem inbound com contexto de tenant e lead
-- Chamar o Claude Haiku com system prompt dinâmico completo do tenant (Story 3.4)
+- Receber texto (e opcionalmente imagem) de uma mensagem inbound com contexto de tenant e lead
+- Chamar o Claude com system prompt dinâmico completo do tenant (Story 3.4)
 - Retornar o texto bruto da resposta do Claude ao chamador (inclui bloco [DADOS_LEAD])
 - Habilitar prompt caching via cache_control ephemeral no system prompt
+- Suportar roteamento Haiku→Sonnet via parâmetro model (Story 3.5)
+- Construir bloco image no payload Claude quando image_url fornecida (Story 3.5)
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from anthropic import AsyncAnthropic
 
-_MODEL = "claude-haiku-4-5-20251001"
+_MODEL_HAIKU = "claude-haiku-4-5-20251001"
+_MODEL_SONNET = "claude-sonnet-4-6"
+
+# Alias para compatibilidade com código legado que referencia _MODEL
+_MODEL = _MODEL_HAIKU
+
+# Palavras-chave que indicam mensagem complexa e ativam roteamento para Sonnet.
+# Lista configurável — edite aqui para ajustar a sensibilidade do detector.
+COMPLEXITY_KEYWORDS: list[str] = [
+    "problema",
+    "erro",
+    "insatisfeito",
+    "insatisfação",
+    "reclamação",
+    "reclamar",
+    "defeito",
+    "quebrado",
+    "danificado",
+    "péssimo",
+    "horrível",
+    "não funciona",
+    "cancelar",
+    "reembolso",
+    "devolução",
+]
 
 _SYSTEM_BASE = (
     "Você é o assistente virtual da {tenant_name}. "
@@ -80,20 +108,32 @@ def _build_system_prompt(tenant_name: str, tenant_context: dict) -> str:
     return prompt
 
 
+def _is_complex_message(text: str) -> bool:
+    """Retorna True se o texto contém palavras-chave de complexidade que ativam Sonnet.
+
+    Verificação case-insensitive contra COMPLEXITY_KEYWORDS.
+    """
+    normalized = text.lower()
+    return any(keyword in normalized for keyword in COMPLEXITY_KEYWORDS)
+
+
 async def process_message(
     tenant_id: str,
     tenant_name: str,
     phone: str,
-    text: str,
+    text: str = "",
     history: list[dict] | None = None,
     tenant_context: dict | None = None,
     lead_data: dict | None = None,
+    image_url: Optional[str] = None,
+    model: str = _MODEL_HAIKU,
 ) -> str:
-    """Processa uma mensagem inbound chamando o Claude Haiku e retorna a resposta bruta.
+    """Processa uma mensagem inbound chamando o Claude e retorna a resposta bruta.
 
     Injeta contexto completo do tenant no system prompt (AC 1, AC 2, AC 3).
     O system prompt é enviado com cache_control ephemeral para habilitar prompt caching (NFR5).
     O histórico de conversa é inserido antes da mensagem atual (Story 3.2).
+    Quando image_url é fornecida, constrói bloco image no payload (Story 3.5, AC 3, AC 4).
 
     A resposta retornada é o texto bruto do Claude, que pode incluir o bloco
     [DADOS_LEAD]...[/DADOS_LEAD]. O chamador é responsável por separar o texto
@@ -109,9 +149,12 @@ async def process_message(
         tenant_context: Dicionário com campos de contexto do tenant (services, regions,
                         business_hours, welcome_message). None equivale a contexto vazio.
         lead_data: Dados de qualificação já coletados do lead (reservado para uso futuro).
+        image_url: URL da imagem a ser enviada ao Claude via bloco image. None = sem imagem.
+        model: Identificador do modelo Claude a usar. Default: Haiku. Use Sonnet para imagens
+               ou mensagens complexas (Story 3.5, AC 6).
 
     Returns:
-        Texto bruto da resposta gerada pelo Claude Haiku (pode conter bloco [DADOS_LEAD]).
+        Texto bruto da resposta gerada pelo Claude (pode conter bloco [DADOS_LEAD]).
 
     Raises:
         Exception: Propaga qualquer exceção da SDK Anthropic ao chamador.
@@ -120,10 +163,25 @@ async def process_message(
     system_text = _build_system_prompt(tenant_name, tenant_context or {})
 
     messages = list(history) if history else []
-    messages.append({"role": "user", "content": text})
+
+    if image_url:
+        user_content: str | list = [
+            {"type": "text", "text": text} if text else {"type": "text", "text": ""},
+            {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": image_url,
+                },
+            },
+        ]
+    else:
+        user_content = text
+
+    messages.append({"role": "user", "content": user_content})
 
     response = await client.messages.create(
-        model=_MODEL,
+        model=model,
         max_tokens=1024,
         system=[
             {

@@ -205,7 +205,7 @@ def _post_valid_webhook_and_capture_persist():
     captured_calls: list = []
     call_event = threading.Event()
 
-    def capture_persist(tenant_id: str, phone: str, content: str) -> None:
+    def capture_persist(tenant_id: str, phone: str, content: str, media_url=None) -> None:
         captured_calls.append({"tenant_id": tenant_id, "phone": phone, "content": content})
         call_event.set()
 
@@ -235,7 +235,7 @@ def _post_valid_webhook(mock_supabase):
 
     call_event = threading.Event()
 
-    def persist_with_signal(*args, **kwargs):
+    def persist_with_signal(tenant_id: str, phone: str, content: str, media_url=None) -> None:
         call_event.set()
 
     with (
@@ -295,7 +295,7 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
     captured_calls: list = []
     call_event = threading.Event()
 
-    def capture_persist(t_id: str, phone: str, content: str) -> None:
+    def capture_persist(t_id: str, phone: str, content: str, media_url=None) -> None:
         captured_calls.append({"tenant_id": t_id})
         call_event.set()
 

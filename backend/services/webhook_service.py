@@ -1,10 +1,10 @@
 """
-Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3 + 3.4).
+Service de processamento de webhooks do Z-API (Story 2.2 + 2.4 + 3.1 + 3.2 + 3.3 + 3.4 + 3.5).
 
 Responsabilidades:
 - Validar o token Z-API contra o esperado
 - Resolver o tenant a partir do instanceId
-- Persistir a mensagem inbound na tabela messages
+- Persistir a mensagem inbound na tabela messages (com media_url para imagens, Story 3.5)
 - Emitir logs estruturados para cada mensagem recebida
 - Disparar agente Claude Haiku (fire-and-forget) para tenants com status "active" (Story 3.1)
 - Carregar histórico de conversa e passar ao agente (Story 3.2)
@@ -12,6 +12,7 @@ Responsabilidades:
 - Buscar ou criar lead antes de processar com o agente (Story 3.3)
 - Injetar contexto completo do tenant no agente (Story 3.4)
 - Parsear bloco [DADOS_LEAD] da resposta e atualizar qualificação do lead (Story 3.4)
+- Rotear para Sonnet em imagens ou mensagens complexas (Story 3.5)
 """
 from __future__ import annotations
 
@@ -26,7 +27,12 @@ from db.conversation import load_conversation_history, persist_outbound_message
 from db.leads import get_or_create_lead, update_lead_qualification
 from db.tenants import get_tenant_context
 from schemas.webhook import ZApiWebhookPayload
-from services.agent_service import process_message
+from services.agent_service import (
+    _MODEL_HAIKU,
+    _MODEL_SONNET,
+    _is_complex_message,
+    process_message,
+)
 from services.qualification import compute_lead_status, parse_lead_data_block
 from services.zapi_client import send_message
 
@@ -51,6 +57,7 @@ class InboundMessage:
     phone: str
     text: str
     instance_id: str
+    image_url: str | None = None
 
 
 def _validate_token(received_token: str | None, expected_token: str) -> None:
@@ -77,19 +84,28 @@ def _resolve_tenant(instance_id: str) -> dict | None:
     return tenant_query_result.data[0]
 
 
-def _persist_inbound_message(tenant_id: str, phone: str, content: str) -> None:
-    """Persiste a mensagem inbound na tabela messages (NFR3: RLS ativo via set_tenant_context)."""
+def _persist_inbound_message(
+    tenant_id: str,
+    phone: str,
+    content: str,
+    media_url: str | None = None,
+) -> None:
+    """Persiste a mensagem inbound na tabela messages (NFR3: RLS ativo via set_tenant_context).
+
+    Para mensagens de imagem, media_url é preenchido com a URL da imagem (Story 3.5, AC 2).
+    """
     set_tenant_context(tenant_id)
     client = get_client()
-    client.table("messages").insert(
-        {
-            "tenant_id": tenant_id,
-            "direction": "inbound",
-            "lead_id": None,
-            "phone": phone,
-            "content": content,
-        }
-    ).execute()
+    row: dict = {
+        "tenant_id": tenant_id,
+        "direction": "inbound",
+        "lead_id": None,
+        "phone": phone,
+        "content": content,
+    }
+    if media_url is not None:
+        row["media_url"] = media_url
+    client.table("messages").insert(row).execute()
 
 
 def _log_invalid_phone(msg: InboundMessage) -> None:
@@ -113,10 +129,11 @@ def _log_inbound_received(msg: InboundMessage) -> None:
     )
 
 
-async def _handle_text_message(msg: InboundMessage) -> None:
-    """Loga, persiste mensagem inbound e dispara agente se tenant estiver ativo.
+async def _handle_inbound_message(msg: InboundMessage) -> None:
+    """Loga, persiste mensagem inbound (texto ou imagem) e dispara agente se tenant ativo.
 
     Mensagens com phone em formato inválido (S2) são descartadas com log de aviso.
+    Quando msg.image_url está presente, persiste media_url e despacha para Sonnet (Story 3.5).
     """
     if not _is_valid_phone(msg.phone):
         _log_invalid_phone(msg)
@@ -125,12 +142,28 @@ async def _handle_text_message(msg: InboundMessage) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None,
-        partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text),
+        partial(
+            _persist_inbound_message,
+            msg.tenant_id,
+            msg.phone,
+            msg.text,
+            msg.image_url,
+        ),
     )
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(
-            _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, msg.text)
+            _dispatch_agent(
+                msg.tenant_id,
+                msg.tenant_name,
+                msg.phone,
+                text=msg.text,
+                image_url=msg.image_url,
+            )
         )
+
+
+# Alias para compatibilidade com testes existentes que patcham _handle_text_message
+_handle_text_message = _handle_inbound_message
 
 
 async def process_inbound_message(
@@ -159,50 +192,70 @@ async def process_inbound_message(
     """
     _validate_token(received_token, expected_token)
 
-    if not payload.is_text_message:
+    is_processable = payload.is_text_message or payload.is_image_message
+    if not is_processable:
         return {"received": True}
 
     tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
     if tenant_row is None:
         return {"received": True}
 
-    # is_text_message garante que text e phone não são None; o type checker não consegue inferir
+    if payload.is_image_message:
+        # is_image_message garante imageMessage.url não nulo; caption opcional como texto
+        text_content = (
+            payload.imageMessage.caption  # type: ignore[union-attr]
+            if payload.imageMessage and payload.imageMessage.caption  # type: ignore[union-attr]
+            else ""
+        )
+        image_url = payload.image_url
+    else:
+        # is_text_message garante text.message não nulo
+        text_content = payload.text.message  # type: ignore[union-attr]
+        image_url = None
+
     msg = InboundMessage(
         tenant_id=tenant_row["id"],
         tenant_status=tenant_row["status"],
         tenant_name=tenant_row.get("name", ""),
         phone=payload.phone,  # type: ignore[arg-type]
-        text=payload.text.message,  # type: ignore[union-attr]
+        text=text_content,
         instance_id=payload.instanceId,
+        image_url=image_url,
     )
-    asyncio.create_task(_handle_text_message(msg))
+    asyncio.create_task(_handle_inbound_message(msg))
 
     return {"received": True}
 
 
 async def _dispatch_agent(
-    tenant_id: str, tenant_name: str, phone: str, text: str
+    tenant_id: str,
+    tenant_name: str,
+    phone: str,
+    text: str = "",
+    image_url: str | None = None,
 ) -> None:
     """Processa a mensagem com o agente Claude e envia a resposta ao remetente.
 
     Executado via asyncio.create_task (fire-and-forget). Falhas são logadas
     e não propagadas para não afetar o fluxo principal do webhook.
 
-    Fluxo (Story 3.2 + 3.3 + 3.4):
+    Fluxo (Story 3.2 + 3.3 + 3.4 + 3.5):
     1. Busca ou cria lead via get_or_create_lead (Story 3.3).
     2. Carrega contexto do tenant via get_tenant_context (Story 3.4).
     3. Carrega histórico de conversa via run_in_executor (não bloqueia event loop).
-    4. Chama process_message com histórico + contexto do tenant + lead atual.
-    5. Parseia bloco [DADOS_LEAD] da resposta bruta (Story 3.4).
-    6. Envia ao lead apenas o texto limpo (sem o bloco JSON) (Story 3.4, AC 8).
-    7. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
-    8. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
+    4. Seleciona modelo: Sonnet se imagem presente ou texto complexo; Haiku caso contrário (Story 3.5).
+    5. Chama process_message com histórico + contexto + modelo + image_url opcional.
+    6. Parseia bloco [DADOS_LEAD] da resposta bruta (Story 3.4).
+    7. Envia ao lead apenas o texto limpo (sem o bloco JSON) (Story 3.4, AC 8).
+    8. Persiste resposta outbound na tabela messages apenas se o envio foi bem-sucedido.
+    9. Atualiza qualificação do lead se bloco [DADOS_LEAD] foi extraído (Story 3.4).
 
     Args:
         tenant_id: UUID do tenant.
         tenant_name: Nome da empresa do tenant, injetado no system prompt do agente.
         phone: Número do remetente original.
-        text: Texto da mensagem recebida.
+        text: Texto da mensagem recebida (pode ser vazio para mensagens de imagem pura).
+        image_url: URL da imagem, se presente. None = mensagem de texto puro (Story 3.5).
     """
     try:
         loop = asyncio.get_event_loop()
@@ -219,6 +272,13 @@ async def _dispatch_agent(
             None,
             partial(load_conversation_history, tenant_id, phone),
         )
+
+        # Seleção de modelo: Sonnet para imagens ou textos complexos (Story 3.5, AC 5, AC 6)
+        if image_url or _is_complex_message(text):
+            model = _MODEL_SONNET
+        else:
+            model = _MODEL_HAIKU
+
         raw_response = await process_message(
             tenant_id=tenant_id,
             tenant_name=tenant_name,
@@ -227,6 +287,8 @@ async def _dispatch_agent(
             history=history,
             tenant_context=tenant_context,
             lead_data=lead,
+            image_url=image_url,
+            model=model,
         )
         lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
         await send_message(tenant_id, phone, clean_response)
