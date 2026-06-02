@@ -312,8 +312,7 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
             new_callable=AsyncMock,
             return_value="Resposta",
         ) as mock_process,
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
         patch("services.webhook_service.update_lead_qualification"),
     ):
@@ -341,7 +340,7 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
 
 @pytest.mark.asyncio
 async def test_dispatch_agent_persists_outbound_after_send_success():
-    """_dispatch_agent deve persistir a resposta outbound após send_message bem-sucedido."""
+    """_dispatch_agent deve chamar deliver_message com lead_id correto."""
     with (
         patch(
             "services.webhook_service.get_or_create_lead",
@@ -357,10 +356,11 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
             new_callable=AsyncMock,
             return_value="Resposta do agente",
         ),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch(
-            "services.webhook_service.persist_outbound_message",
-        ) as mock_persist,
+            "services.webhook_service.deliver_message",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_deliver,
         patch(
             "services.webhook_service.parse_lead_data_block",
             return_value=(None, "Resposta do agente"),
@@ -371,22 +371,20 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
 
         await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
-    mock_persist.assert_called_once_with(
-        tenant_id="tenant-001",
-        phone="5511999999999",
-        content="Resposta do agente",
-        lead_id="lead-001",
+    mock_deliver.assert_called_once_with(
+        "tenant-001", "5511999999999", "Resposta do agente", lead_id="lead-001"
     )
 
 
 @pytest.mark.asyncio
-async def test_dispatch_agent_does_not_persist_if_send_fails():
-    """_dispatch_agent não deve persistir outbound se send_message falhar."""
+async def test_dispatch_agent_skips_lead_update_if_delivery_fails():
+    """_dispatch_agent não deve atualizar lead se deliver_message retornar False."""
     with (
         patch(
             "services.webhook_service.get_or_create_lead",
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
+        patch("services.webhook_service.get_tenant_context", return_value={}),
         patch(
             "services.webhook_service.load_conversation_history",
             return_value=[],
@@ -397,17 +395,15 @@ async def test_dispatch_agent_does_not_persist_if_send_fails():
             return_value="Resposta",
         ),
         patch(
-            "services.webhook_service.send_message",
+            "services.webhook_service.deliver_message",
             new_callable=AsyncMock,
-            side_effect=Exception("Falha no envio"),
+            return_value=False,
         ),
-        patch(
-            "services.webhook_service.persist_outbound_message",
-        ) as mock_persist,
+        patch("services.webhook_service.parse_lead_data_block", return_value=({"name": "Test"}, "Resposta")),
+        patch("services.webhook_service.update_lead_qualification") as mock_update,
     ):
         from services.webhook_service import _dispatch_agent
 
-        # fire-and-forget não propaga — mas internamente deve capturar antes de persist
         await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
-    mock_persist.assert_not_called()
+    mock_update.assert_not_called()

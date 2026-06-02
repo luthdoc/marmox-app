@@ -58,7 +58,7 @@ async def test_lead_scheduled_sends_message_to_owner_phone():
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_send,
@@ -81,7 +81,7 @@ async def test_lead_scheduled_message_contains_required_fields():
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_send,
@@ -105,7 +105,7 @@ async def test_lead_scheduled_skips_when_owner_phone_is_null(caplog):
             return_value=None,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
         ) as mock_send,
     ):
@@ -125,7 +125,7 @@ async def test_lead_scheduled_logs_notification_info(caplog):
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -151,7 +151,7 @@ async def test_escalation_sends_message_to_owner_phone():
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_send,
@@ -173,7 +173,7 @@ async def test_escalation_message_contains_lead_phone():
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_send,
@@ -193,7 +193,7 @@ async def test_escalation_skips_when_owner_phone_is_null(caplog):
             return_value=None,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
         ) as mock_send,
     ):
@@ -213,7 +213,7 @@ async def test_escalation_logs_notification_info(caplog):
             return_value=OWNER_PHONE,
         ),
         patch(
-            "services.notification_service.send_message",
+            "services.notification_service.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ),

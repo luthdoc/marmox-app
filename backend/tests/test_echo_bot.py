@@ -120,9 +120,8 @@ def test_onboarding_tenant_does_not_receive_echo():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
         patch("services.webhook_service.process_message", new_callable=AsyncMock),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(
@@ -148,13 +147,12 @@ def test_agent_failure_does_not_affect_http_response():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
             side_effect=Exception("API indisponível"),
         ),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(

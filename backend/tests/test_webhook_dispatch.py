@@ -116,12 +116,11 @@ def test_onboarding_tenant_does_not_dispatch_to_agent():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.persist_outbound_message"),
         patch(
             "services.webhook_service.process_message",
             new_callable=AsyncMock,
         ) as mock_process,
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(

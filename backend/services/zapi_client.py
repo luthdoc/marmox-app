@@ -18,7 +18,7 @@ from typing import TypedDict
 
 import httpx
 
-from db.client import get_client, set_tenant_context
+from db.client import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -206,9 +206,8 @@ def _log_send_exhausted(tenant_id: str, phone: str) -> None:
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
 
-    Busca as credenciais do tenant, faz até 3 tentativas com backoff
-    exponencial (1s, 2s) e persiste a mensagem enviada na tabela
-    messages em caso de sucesso.
+    Responsabilidade: HTTP + retry + logging apenas.
+    Persistência em messages é responsabilidade do chamador via deliver_message.
 
     Args:
         tenant_id: UUID do tenant que envia a mensagem.
@@ -229,30 +228,8 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     async with httpx.AsyncClient() as http_client:
         success = await _retry_send(http_client, ctx)
 
-    if success:
-        await asyncio.to_thread(_persist_outbound_message, tenant_id, phone, text)
-        return True
+    if not success:
+        _log_send_exhausted(tenant_id, phone)
+        return False
 
-    _log_send_exhausted(tenant_id, phone)
-    return False
-
-
-def _persist_outbound_message(tenant_id: str, phone: str, content: str) -> None:
-    """Persiste a mensagem enviada com sucesso na tabela messages (NFR3: RLS ativo via set_tenant_context).
-
-    Args:
-        tenant_id: UUID do tenant remetente.
-        phone: Número do destinatário.
-        content: Texto da mensagem enviada.
-    """
-    set_tenant_context(tenant_id)
-    client = get_client()
-    client.table("messages").insert(
-        {
-            "tenant_id": tenant_id,
-            "direction": "outbound",
-            "lead_id": None,
-            "phone": phone,
-            "content": content,
-        }
-    ).execute()
+    return True

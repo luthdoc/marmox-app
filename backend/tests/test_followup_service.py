@@ -48,7 +48,7 @@ async def test_first_followup_sends_message_and_updates_timestamp():
     ]
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, return_value=True) as mock_send,
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
     ):
@@ -73,7 +73,7 @@ async def test_first_followup_uses_lead_name_in_template():
     mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, return_value=True) as mock_send,
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
     ):
@@ -93,7 +93,7 @@ async def test_first_followup_uses_voce_when_name_is_none():
     mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, return_value=True) as mock_send,
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
     ):
@@ -121,7 +121,7 @@ async def test_first_followup_calls_set_tenant_context_before_update():
     )[1]
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, return_value=True),
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context", side_effect=record_set_ctx),
     ):
@@ -146,7 +146,7 @@ async def test_second_followup_sends_message_marks_cold_and_notifies_owner():
     ]
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, return_value=True) as mock_send,
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
         patch(
@@ -171,7 +171,7 @@ async def test_second_followup_zapi_failure_does_not_propagate():
     mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, side_effect=Exception("Z-API down")),
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, side_effect=Exception("Z-API down")),
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
         patch("services.followup_service.notify_owner_lead_cold", new_callable=AsyncMock),
@@ -189,7 +189,7 @@ async def test_first_followup_zapi_failure_does_not_propagate():
     mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
 
     with (
-        patch("services.followup_service.send_message", new_callable=AsyncMock, side_effect=Exception("Z-API down")),
+        patch("services.followup_service.deliver_message", new_callable=AsyncMock, side_effect=Exception("Z-API down")),
         patch("services.followup_service.get_client", return_value=mock_supabase),
         patch("services.followup_service.set_tenant_context"),
     ):
@@ -208,7 +208,7 @@ async def test_notify_owner_lead_cold_sends_message_to_owner():
     """notify_owner_lead_cold deve buscar owner_phone e enviar mensagem ao dono."""
     with (
         patch("services.notification_service.get_owner_phone", return_value="5511777777777"),
-        patch("services.notification_service.send_message", new_callable=AsyncMock) as mock_send,
+        patch("services.notification_service.deliver_message", new_callable=AsyncMock) as mock_send,
     ):
         from services.notification_service import notify_owner_lead_cold
 
@@ -223,7 +223,7 @@ async def test_notify_owner_lead_cold_owner_phone_null_does_not_raise():
     """notify_owner_lead_cold com owner_phone NULL deve retornar sem exceção."""
     with (
         patch("services.notification_service.get_owner_phone", return_value=None),
-        patch("services.notification_service.send_message", new_callable=AsyncMock) as mock_send,
+        patch("services.notification_service.deliver_message", new_callable=AsyncMock) as mock_send,
     ):
         from services.notification_service import notify_owner_lead_cold
 

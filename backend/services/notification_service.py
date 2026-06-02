@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from db.tenants import get_owner_phone
-from services.zapi_client import send_message
+from services.message_delivery import deliver_message
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ async def notify_owner_lead_scheduled(tenant_id: str, lead: dict) -> None:
         "Enviando notificação de agendamento ao dono",
         extra={"tenant_id": tenant_id, "lead_id": lead.get("id"), "notification_type": "scheduled"},
     )
-    await send_message(tenant_id, owner_phone, _format_scheduled_message(lead))
+    await deliver_message(tenant_id, owner_phone, _format_scheduled_message(lead))
 
 
 def _format_escalation_message(lead_phone: str) -> str:
@@ -87,7 +87,7 @@ async def notify_owner_escalation(
         "Enviando notificação de escalada ao dono",
         extra={"tenant_id": tenant_id, "lead_id": lead_id, "notification_type": "escalation"},
     )
-    await send_message(tenant_id, owner_phone, _format_escalation_message(lead_phone))
+    await deliver_message(tenant_id, owner_phone, _format_escalation_message(lead_phone))
 
 
 def _format_cold_lead_message(lead: dict) -> str:
@@ -127,4 +127,4 @@ async def notify_owner_lead_cold(tenant_id: str, lead: dict) -> None:
             "notification_type": "cold",
         },
     )
-    await send_message(tenant_id, owner_phone, _format_cold_lead_message(lead))
+    await deliver_message(tenant_id, owner_phone, _format_cold_lead_message(lead))

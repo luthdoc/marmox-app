@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from db.client import get_client, set_tenant_context
-from db.conversation import load_conversation_history, persist_outbound_message
+from db.conversation import load_conversation_history
 from db.leads import get_or_create_lead, update_lead_qualification
 from db.tenants import get_owner_phone, get_tenant_context
 from schemas.webhook import ZApiWebhookPayload
@@ -19,6 +19,7 @@ from services.agent_service import (
     process_message,
 )
 from services.dispatch_helpers import _should_notify_scheduled
+from services.message_delivery import deliver_message
 from services.notification_service import (
     ESCALATION_SENTINEL,
     contains_escalation_sentinel,
@@ -27,7 +28,6 @@ from services.notification_service import (
 )
 from services.onboarding_dispatch import dispatch_onboarding_agent
 from services.qualification import compute_lead_status, parse_lead_data_block
-from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
 
@@ -250,13 +250,10 @@ async def _handle_agent_response(
     has_escalation = contains_escalation_sentinel(raw_response)
     lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
     clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
-    await send_message(tenant_id, phone, clean_response)
+    if not await deliver_message(tenant_id, phone, clean_response, lead_id=lead["id"]):
+        return
     loop = asyncio.get_event_loop()
     lead_id = lead["id"]
-    await loop.run_in_executor(
-        None,
-        partial(persist_outbound_message, tenant_id=tenant_id, phone=phone, content=clean_response, lead_id=lead_id),
-    )
     if lead_data_extracted is not None:
         await _apply_lead_update_and_notify(lead_id, tenant_id, loop=loop, lead=lead, lead_data_extracted=lead_data_extracted)
     if has_escalation:

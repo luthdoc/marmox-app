@@ -113,8 +113,7 @@ def test_image_message_process_message_uses_sonnet():
         patch("services.webhook_service.get_tenant_context", return_value=context),
         patch("services.webhook_service.load_conversation_history", return_value=history),
         patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.webhook_service.update_lead_qualification"),
         patch("services.webhook_service.set_tenant_context"),
     ):
@@ -157,8 +156,7 @@ def test_complaint_text_routes_to_sonnet():
         patch("services.webhook_service.get_tenant_context", return_value={}),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
         patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.webhook_service.update_lead_qualification"),
         patch("services.webhook_service.set_tenant_context"),
     ):
@@ -190,8 +188,7 @@ def test_simple_text_routes_to_haiku():
         patch("services.webhook_service.get_tenant_context", return_value={}),
         patch("services.webhook_service.load_conversation_history", return_value=[]),
         patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.webhook_service.update_lead_qualification"),
         patch("services.webhook_service.set_tenant_context"),
     ):
