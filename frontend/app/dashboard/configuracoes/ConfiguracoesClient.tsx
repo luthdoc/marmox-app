@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase";
 import { Card } from "@/components/ui/Card";
 import { InlineField } from "@/components/InlineField";
 
@@ -24,6 +24,8 @@ function parseList(raw: string): string[] {
 }
 
 export function ConfiguracoesClient({ tenant }: ConfiguracoesClientProps) {
+  const supabase = createClient();
+
   async function saveField(field: keyof TenantConfig, rawValue: string) {
     const value =
       field === "services" || field === "regions"

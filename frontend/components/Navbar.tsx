@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase";
 import { Button } from "./ui/Button";
 
 export function Navbar() {
   const router = useRouter();
+  const supabase = createClient();
 
   async function handleSignOut() {
     await supabase.auth.signOut();

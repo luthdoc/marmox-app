@@ -2,13 +2,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
+const mockSignOut = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/supabase", () => ({
-  supabase: {
+  createClient: () => ({
     auth: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      signOut: vi.fn() as any,
+      signOut: mockSignOut,
     },
-  },
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -16,11 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { Navbar } from "../Navbar";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockSignOut = vi.mocked(supabase.auth.signOut) as any;
 
 describe("Navbar", () => {
   let mockPush: ReturnType<typeof vi.fn>;

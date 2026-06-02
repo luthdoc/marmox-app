@@ -12,14 +12,15 @@ describe("supabase browser client", () => {
     vi.resetModules();
   });
 
-  it("exporta um objeto supabase com auth", async () => {
+  it("createClient retorna objeto com auth", async () => {
     const { createBrowserClient } = await import("@supabase/ssr");
     const mockClient = { auth: { getSession: vi.fn() } };
     vi.mocked(createBrowserClient).mockReturnValue(mockClient as ReturnType<typeof createBrowserClient>);
 
-    const { supabase } = await import("../supabase");
-    expect(supabase).toBeDefined();
-    expect(supabase.auth).toBeDefined();
+    const { createClient } = await import("../supabase");
+    const client = createClient();
+    expect(client).toBeDefined();
+    expect(client.auth).toBeDefined();
   });
 
   it("usa NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY", async () => {
@@ -27,7 +28,8 @@ describe("supabase browser client", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "test-anon-key");
 
     const { createBrowserClient } = await import("@supabase/ssr");
-    await import("../supabase");
+    const { createClient } = await import("../supabase");
+    createClient();
 
     expect(createBrowserClient).toHaveBeenCalledWith(
       "https://test.supabase.co",
