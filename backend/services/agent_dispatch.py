@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
-
 from db.conversation import load_conversation_history
 from db.leads import get_or_create_lead, update_lead_qualification
 from db.tenants import get_tenant_context
