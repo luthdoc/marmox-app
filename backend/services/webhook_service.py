@@ -5,29 +5,10 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from functools import partial
 
 from db.client import get_client, set_tenant_context
-from db.conversation import load_conversation_history
-from db.leads import get_or_create_lead, update_lead_qualification
-from db.tenants import get_owner_phone, get_tenant_context
 from schemas.webhook import ZApiWebhookPayload
-from services.agent_service import (
-    _MODEL_HAIKU,
-    _MODEL_SONNET,
-    _is_complex_message,
-    process_message,
-)
-from services.dispatch_helpers import _should_notify_scheduled
-from services.message_delivery import deliver_message
-from services.notification_service import (
-    ESCALATION_SENTINEL,
-    contains_escalation_sentinel,
-    notify_owner_escalation,
-    notify_owner_lead_scheduled,
-)
-from services.onboarding_dispatch import dispatch_onboarding_agent
-from services.qualification import compute_lead_status, parse_lead_data_block
+from services.agent_dispatch import dispatch_agent
 
 logger = logging.getLogger(__name__)
 
@@ -117,18 +98,13 @@ async def _handle_inbound_message(msg: InboundMessage) -> None:
         logger.warning("Mensagem descartada — phone inválido", extra={"tenant_id": msg.tenant_id, "phone": msg.phone})
         return
     logger.info("Mensagem inbound recebida", extra={"tenant_id": msg.tenant_id, "phone": msg.phone, "message_length": len(msg.text), "instance_id": msg.instance_id})
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, partial(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text, media_url=msg.image_url))
+    await asyncio.to_thread(_persist_inbound_message, msg.tenant_id, msg.phone, msg.text, media_url=msg.image_url)
     if msg.tenant_status == _ACTIVE_STATUS:
         asyncio.create_task(
-            _dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
+            dispatch_agent(msg.tenant_id, msg.tenant_name, msg.phone, text=msg.text, image_url=msg.image_url)
         )
     elif msg.tenant_status == _ONBOARDING_STATUS:
         await _route_onboarding_message(msg)
-
-
-# Alias para compatibilidade com testes existentes que patcham _handle_text_message
-_handle_text_message = _handle_inbound_message
 
 
 def _parse_message_content(payload: ZApiWebhookPayload) -> tuple[str, str | None]:
@@ -154,47 +130,6 @@ def _build_inbound_message(
     )
 
 
-async def _fetch_dispatch_context(
-    tenant_id: str, phone: str
-) -> tuple[dict, dict, list[dict]]:
-    """Carrega lead, contexto do tenant e histórico em paralelo sequencial."""
-    loop = asyncio.get_event_loop()
-    lead = await loop.run_in_executor(None, partial(get_or_create_lead, tenant_id, phone))
-    tenant_context = await loop.run_in_executor(None, partial(get_tenant_context, tenant_id))
-    history = await loop.run_in_executor(None, partial(load_conversation_history, tenant_id, phone))
-    return lead, tenant_context, history
-
-
-def _select_model(text: str, image_url: str | None) -> str:
-    """Seleciona modelo: Sonnet para imagens ou textos complexos; Haiku caso contrário."""
-    if image_url or _is_complex_message(text):
-        return _MODEL_SONNET
-    return _MODEL_HAIKU
-
-
-async def _apply_lead_update_and_notify(
-    lead_id: str,
-    tenant_id: str,
-    *,
-    loop: asyncio.AbstractEventLoop,
-    lead: dict,
-    lead_data_extracted: dict,
-) -> None:
-    """Atualiza qualificação do lead e notifica dono se status mudou para 'scheduled'."""
-    new_status = compute_lead_status(lead.get("status", "new"), lead_data_extracted)
-    patch_data = {
-        key: lead_data_extracted.get(key)
-        for key in ("name", "service_type", "material", "urgency", "region", "scheduled_at")
-    }
-    patch_data["status"] = new_status
-    await loop.run_in_executor(
-        None, partial(update_lead_qualification, lead_id, tenant_id, patch_data)
-    )
-    if _should_notify_scheduled(new_status, lead.get("status")):
-        updated_lead = {**lead, **{k: v for k, v in patch_data.items() if v is not None}}
-        asyncio.create_task(notify_owner_lead_scheduled(tenant_id, updated_lead))
-
-
 async def process_inbound_message(
     payload: ZApiWebhookPayload,
     received_token: str | None,
@@ -211,76 +146,3 @@ async def process_inbound_message(
     msg = _build_inbound_message(tenant_row, payload, text, image_url=image_url)
     asyncio.create_task(_handle_inbound_message(msg))
     return {"received": True}
-
-
-async def _call_agent(
-    *,
-    tenant_id: str,
-    tenant_name: str,
-    phone: str,
-    text: str,
-    image_url: str | None,
-    lead: dict,
-    tenant_context: dict,
-    history: list[dict],
-) -> str:
-    """Chama process_message com o modelo selecionado e retorna resposta bruta."""
-    model = _select_model(text, image_url)
-    return await process_message(
-        tenant_id=tenant_id,
-        tenant_name=tenant_name,
-        phone=phone,
-        text=text,
-        history=history,
-        tenant_context=tenant_context,
-        lead_data=lead,
-        image_url=image_url,
-        model=model,
-    )
-
-
-async def _handle_agent_response(
-    *,
-    tenant_id: str,
-    phone: str,
-    lead: dict,
-    raw_response: str,
-) -> None:
-    """Envia resposta limpa, persiste outbound e aplica atualizações de lead."""
-    has_escalation = contains_escalation_sentinel(raw_response)
-    lead_data_extracted, clean_response = parse_lead_data_block(raw_response)
-    clean_response = clean_response.replace(ESCALATION_SENTINEL, "").strip()
-    if not await deliver_message(tenant_id, phone, clean_response, lead_id=lead["id"]):
-        return
-    loop = asyncio.get_event_loop()
-    lead_id = lead["id"]
-    if lead_data_extracted is not None:
-        await _apply_lead_update_and_notify(lead_id, tenant_id, loop=loop, lead=lead, lead_data_extracted=lead_data_extracted)
-    if has_escalation:
-        asyncio.create_task(notify_owner_escalation(tenant_id, lead_id, phone))
-
-
-async def _dispatch_agent(
-    tenant_id: str,
-    tenant_name: str,
-    phone: str,
-    *,
-    text: str = "",
-    image_url: str | None = None,
-) -> None:
-    """Fire-and-forget: processa mensagem com Claude e envia resposta."""
-    try:
-        lead, tenant_context, history = await _fetch_dispatch_context(tenant_id, phone)
-        raw_response = await _call_agent(
-            tenant_id=tenant_id, tenant_name=tenant_name, phone=phone,
-            text=text, image_url=image_url, lead=lead,
-            tenant_context=tenant_context, history=history,
-        )
-        await _handle_agent_response(tenant_id=tenant_id, phone=phone, lead=lead, raw_response=raw_response)
-    except Exception as exc:
-        logger.error(
-            "Falha ao processar mensagem com agente — erro ignorado (fire-and-forget)",
-            extra={"tenant_id": tenant_id, "phone": phone, "error": str(exc)},
-        )
-
-
