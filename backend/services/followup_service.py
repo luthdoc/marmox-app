@@ -20,8 +20,8 @@ from services.followup_query import (
     get_leads_for_first_followup,
     get_leads_for_second_followup,
 )
+from services.message_delivery import deliver_message
 from services.notification_service import notify_owner_lead_cold
-from services.zapi_client import send_message
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ async def send_first_followup(tenant_id: str, lead: dict) -> None:
     """
     message = _interpolate(FIRST_FOLLOWUP_TEMPLATE, lead)
     try:
-        await send_message(tenant_id, lead["phone"], message)
+        await deliver_message(tenant_id, lead["phone"], message)
     except Exception as exc:
         logger.warning(
             "Falha ao enviar primeiro follow-up via Z-API",
@@ -90,7 +90,7 @@ async def send_second_followup(tenant_id: str, lead: dict) -> None:
     """
     message = _interpolate(SECOND_FOLLOWUP_TEMPLATE, lead)
     try:
-        await send_message(tenant_id, lead["phone"], message)
+        await deliver_message(tenant_id, lead["phone"], message)
     except Exception as exc:
         logger.warning(
             "Falha ao enviar segundo follow-up via Z-API",
