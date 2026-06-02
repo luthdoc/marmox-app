@@ -104,6 +104,13 @@ def _build_system_prompt(tenant_name: str, tenant_context: dict) -> str:
     return prompt
 
 
+def select_model(text: str, image_url: str | None) -> str:
+    """Seleciona modelo: Sonnet para imagens ou textos complexos; Haiku caso contrário."""
+    if image_url or _is_complex_message(text):
+        return _MODEL_SONNET
+    return _MODEL_HAIKU
+
+
 def _is_complex_message(text: str) -> bool:
     """Retorna True se o texto contém palavras-chave de complexidade que ativam Sonnet.
 
@@ -143,7 +150,6 @@ async def process_message(
     text: str = "",
     history: list[dict] | None = None,
     tenant_context: dict | None = None,
-    lead_data: dict | None = None,
     image_url: Optional[str] = None,
     model: str = _MODEL_HAIKU,
 ) -> str:
