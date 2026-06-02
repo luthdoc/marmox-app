@@ -42,8 +42,7 @@ async def test_dispatch_agent_calls_get_or_create_lead():
             new_callable=AsyncMock,
             return_value="Resposta",
         ),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
-        patch("services.webhook_service.persist_outbound_message"),
+        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
         patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
         patch("services.webhook_service.update_lead_qualification"),
         patch(
@@ -74,10 +73,11 @@ async def test_dispatch_agent_passes_lead_id_to_persist():
             new_callable=AsyncMock,
             return_value="Resposta do agente",
         ),
-        patch("services.webhook_service.send_message", new_callable=AsyncMock),
         patch(
-            "services.webhook_service.persist_outbound_message",
-        ) as mock_persist,
+            "services.webhook_service.deliver_message",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_deliver,
         patch(
             "services.webhook_service.parse_lead_data_block",
             return_value=(None, "Resposta do agente"),
@@ -92,9 +92,6 @@ async def test_dispatch_agent_passes_lead_id_to_persist():
 
         await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
 
-    mock_persist.assert_called_once_with(
-        tenant_id=TENANT_ID,
-        phone=PHONE,
-        content="Resposta do agente",
-        lead_id=LEAD_ID,
+    mock_deliver.assert_called_once_with(
+        TENANT_ID, PHONE, "Resposta do agente", lead_id=LEAD_ID
     )
