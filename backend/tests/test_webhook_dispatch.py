@@ -78,7 +78,7 @@ def test_active_tenant_dispatches_to_agent():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch(
-            "services.webhook_service._dispatch_agent",
+            "services.webhook_service.dispatch_agent",
             side_effect=capture_dispatch,
         ),
     ):
@@ -115,12 +115,7 @@ def test_onboarding_tenant_does_not_dispatch_to_agent():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch(
-            "services.webhook_service.process_message",
-            new_callable=AsyncMock,
-        ) as mock_process,
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock) as mock_dispatch,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(
@@ -129,4 +124,4 @@ def test_onboarding_tenant_does_not_dispatch_to_agent():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    mock_process.assert_not_called()
+    mock_dispatch.assert_not_called()

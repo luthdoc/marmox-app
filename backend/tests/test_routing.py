@@ -81,7 +81,7 @@ def test_image_message_routes_to_sonnet():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service._dispatch_agent", side_effect=fake_dispatch),
+        patch("services.webhook_service.dispatch_agent", side_effect=fake_dispatch),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
             client.post(
@@ -109,13 +109,12 @@ def test_image_message_process_message_uses_sonnet():
     history = []
 
     with (
-        patch("services.webhook_service.get_or_create_lead", return_value=lead),
-        patch("services.webhook_service.get_tenant_context", return_value=context),
-        patch("services.webhook_service.load_conversation_history", return_value=history),
-        patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
-        patch("services.webhook_service.update_lead_qualification"),
-        patch("services.webhook_service.set_tenant_context"),
+        patch("services.agent_dispatch.get_or_create_lead", return_value=lead),
+        patch("services.agent_dispatch.get_tenant_context", return_value=context),
+        patch("services.agent_dispatch.load_conversation_history", return_value=history),
+        patch("services.agent_dispatch.process_message", side_effect=fake_process_message),
+        patch("services.agent_dispatch.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.agent_dispatch.update_lead_qualification"),
     ):
         asyncio.run(
             _run_dispatch_agent_with_image(
@@ -132,8 +131,8 @@ def test_image_message_process_message_uses_sonnet():
 
 
 async def _run_dispatch_agent_with_image(tenant_id, tenant_name, phone, image_url):
-    from services.webhook_service import _dispatch_agent
-    await _dispatch_agent(tenant_id, tenant_name, phone, image_url=image_url)
+    from services.agent_dispatch import dispatch_agent
+    await dispatch_agent(tenant_id, tenant_name, phone, image_url=image_url)
 
 
 # ---------------------------------------------------------------------------
@@ -152,13 +151,12 @@ def test_complaint_text_routes_to_sonnet():
     lead = {"id": "lead-uuid", "status": "new"}
 
     with (
-        patch("services.webhook_service.get_or_create_lead", return_value=lead),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
-        patch("services.webhook_service.update_lead_qualification"),
-        patch("services.webhook_service.set_tenant_context"),
+        patch("services.agent_dispatch.get_or_create_lead", return_value=lead),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.load_conversation_history", return_value=[]),
+        patch("services.agent_dispatch.process_message", side_effect=fake_process_message),
+        patch("services.agent_dispatch.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.agent_dispatch.update_lead_qualification"),
     ):
         asyncio.run(
             _run_dispatch_agent_text(
@@ -184,13 +182,12 @@ def test_simple_text_routes_to_haiku():
     lead = {"id": "lead-uuid", "status": "new"}
 
     with (
-        patch("services.webhook_service.get_or_create_lead", return_value=lead),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.process_message", side_effect=fake_process_message),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
-        patch("services.webhook_service.update_lead_qualification"),
-        patch("services.webhook_service.set_tenant_context"),
+        patch("services.agent_dispatch.get_or_create_lead", return_value=lead),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.load_conversation_history", return_value=[]),
+        patch("services.agent_dispatch.process_message", side_effect=fake_process_message),
+        patch("services.agent_dispatch.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.agent_dispatch.update_lead_qualification"),
     ):
         asyncio.run(
             _run_dispatch_agent_text(
@@ -206,8 +203,8 @@ def test_simple_text_routes_to_haiku():
 
 
 async def _run_dispatch_agent_text(tenant_id, tenant_name, phone, text):
-    from services.webhook_service import _dispatch_agent
-    await _dispatch_agent(tenant_id, tenant_name, phone, text=text)
+    from services.agent_dispatch import dispatch_agent
+    await dispatch_agent(tenant_id, tenant_name, phone, text=text)
 
 
 # ---------------------------------------------------------------------------

@@ -35,24 +35,24 @@ def _make_lead_row() -> dict:
 async def test_dispatch_agent_calls_get_or_create_lead():
     """_dispatch_agent deve chamar get_or_create_lead com (tenant_id, phone)."""
     with (
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.load_conversation_history", return_value=[]),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
         patch(
-            "services.webhook_service.process_message",
+            "services.agent_dispatch.process_message",
             new_callable=AsyncMock,
             return_value="Resposta",
         ),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
-        patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
-        patch("services.webhook_service.update_lead_qualification"),
+        patch("services.agent_dispatch.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.agent_dispatch.parse_lead_data_block", return_value=(None, "Resposta")),
+        patch("services.agent_dispatch.update_lead_qualification"),
         patch(
-            "services.webhook_service.get_or_create_lead",
+            "services.agent_dispatch.get_or_create_lead",
             return_value=_make_lead_row(),
         ) as mock_get_or_create,
     ):
-        from services.webhook_service import _dispatch_agent
+        from services.agent_dispatch import dispatch_agent
 
-        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
+        await dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
 
     mock_get_or_create.assert_called_once_with(TENANT_ID, PHONE)
 
@@ -66,31 +66,31 @@ async def test_dispatch_agent_calls_get_or_create_lead():
 async def test_dispatch_agent_passes_lead_id_to_persist():
     """_dispatch_agent deve passar o lead_id retornado por get_or_create_lead ao persist_outbound_message."""
     with (
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.load_conversation_history", return_value=[]),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
         patch(
-            "services.webhook_service.process_message",
+            "services.agent_dispatch.process_message",
             new_callable=AsyncMock,
             return_value="Resposta do agente",
         ),
         patch(
-            "services.webhook_service.deliver_message",
+            "services.agent_dispatch.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_deliver,
         patch(
-            "services.webhook_service.parse_lead_data_block",
+            "services.agent_dispatch.parse_lead_data_block",
             return_value=(None, "Resposta do agente"),
         ),
-        patch("services.webhook_service.update_lead_qualification"),
+        patch("services.agent_dispatch.update_lead_qualification"),
         patch(
-            "services.webhook_service.get_or_create_lead",
+            "services.agent_dispatch.get_or_create_lead",
             return_value=_make_lead_row(),
         ),
     ):
-        from services.webhook_service import _dispatch_agent
+        from services.agent_dispatch import dispatch_agent
 
-        await _dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
+        await dispatch_agent(TENANT_ID, "Marmoraria Teste", PHONE, text="Olá")
 
     mock_deliver.assert_called_once_with(
         TENANT_ID, PHONE, "Resposta do agente", lead_id=LEAD_ID
