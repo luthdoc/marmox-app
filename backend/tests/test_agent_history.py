@@ -296,29 +296,29 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
 
     with (
         patch(
-            "services.webhook_service.get_or_create_lead",
+            "services.agent_dispatch.get_or_create_lead",
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
         patch(
-            "services.webhook_service.get_tenant_context",
+            "services.agent_dispatch.get_tenant_context",
             return_value=tenant_ctx,
         ),
         patch(
-            "services.webhook_service.load_conversation_history",
+            "services.agent_dispatch.load_conversation_history",
             return_value=history,
         ),
         patch(
-            "services.webhook_service.process_message",
+            "services.agent_dispatch.process_message",
             new_callable=AsyncMock,
             return_value="Resposta",
         ) as mock_process,
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
-        patch("services.webhook_service.parse_lead_data_block", return_value=(None, "Resposta")),
-        patch("services.webhook_service.update_lead_qualification"),
+        patch("services.agent_dispatch.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.agent_dispatch.parse_lead_data_block", return_value=(None, "Resposta")),
+        patch("services.agent_dispatch.update_lead_qualification"),
     ):
-        from services.webhook_service import _dispatch_agent
+        from services.agent_dispatch import dispatch_agent
 
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
+        await dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_process.assert_called_once_with(
         tenant_id="tenant-001",
@@ -327,7 +327,6 @@ async def test_dispatch_agent_loads_history_and_passes_to_process_message():
         text="Olá",
         history=history,
         tenant_context=tenant_ctx,
-        lead_data={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         image_url=None,
         model="claude-haiku-4-5-20251001",
     )
@@ -343,33 +342,33 @@ async def test_dispatch_agent_persists_outbound_after_send_success():
     """_dispatch_agent deve chamar deliver_message com lead_id correto."""
     with (
         patch(
-            "services.webhook_service.get_or_create_lead",
+            "services.agent_dispatch.get_or_create_lead",
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
         patch(
-            "services.webhook_service.load_conversation_history",
+            "services.agent_dispatch.load_conversation_history",
             return_value=[],
         ),
         patch(
-            "services.webhook_service.process_message",
+            "services.agent_dispatch.process_message",
             new_callable=AsyncMock,
             return_value="Resposta do agente",
         ),
         patch(
-            "services.webhook_service.deliver_message",
+            "services.agent_dispatch.deliver_message",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_deliver,
         patch(
-            "services.webhook_service.parse_lead_data_block",
+            "services.agent_dispatch.parse_lead_data_block",
             return_value=(None, "Resposta do agente"),
         ),
-        patch("services.webhook_service.update_lead_qualification"),
+        patch("services.agent_dispatch.update_lead_qualification"),
     ):
-        from services.webhook_service import _dispatch_agent
+        from services.agent_dispatch import dispatch_agent
 
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
+        await dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_deliver.assert_called_once_with(
         "tenant-001", "5511999999999", "Resposta do agente", lead_id="lead-001"
@@ -381,29 +380,29 @@ async def test_dispatch_agent_skips_lead_update_if_delivery_fails():
     """_dispatch_agent não deve atualizar lead se deliver_message retornar False."""
     with (
         patch(
-            "services.webhook_service.get_or_create_lead",
+            "services.agent_dispatch.get_or_create_lead",
             return_value={"id": "lead-001", "tenant_id": "tenant-001", "phone": "5511999999999", "status": "new"},
         ),
-        patch("services.webhook_service.get_tenant_context", return_value={}),
+        patch("services.agent_dispatch.get_tenant_context", return_value={}),
         patch(
-            "services.webhook_service.load_conversation_history",
+            "services.agent_dispatch.load_conversation_history",
             return_value=[],
         ),
         patch(
-            "services.webhook_service.process_message",
+            "services.agent_dispatch.process_message",
             new_callable=AsyncMock,
             return_value="Resposta",
         ),
         patch(
-            "services.webhook_service.deliver_message",
+            "services.agent_dispatch.deliver_message",
             new_callable=AsyncMock,
             return_value=False,
         ),
-        patch("services.webhook_service.parse_lead_data_block", return_value=({"name": "Test"}, "Resposta")),
-        patch("services.webhook_service.update_lead_qualification") as mock_update,
+        patch("services.agent_dispatch.parse_lead_data_block", return_value=({"name": "Test"}, "Resposta")),
+        patch("services.agent_dispatch.update_lead_qualification") as mock_update,
     ):
-        from services.webhook_service import _dispatch_agent
+        from services.agent_dispatch import dispatch_agent
 
-        await _dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
+        await dispatch_agent("tenant-001", "Marmoraria", "5511999999999", text="Olá")
 
     mock_update.assert_not_called()

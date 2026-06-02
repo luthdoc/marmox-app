@@ -86,7 +86,7 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch(
-            "services.webhook_service._dispatch_agent",
+            "services.webhook_service.dispatch_agent",
             side_effect=capture_dispatch,
         ),
     ):
@@ -112,16 +112,14 @@ def test_active_tenant_webhook_schedules_agent_dispatch():
 
 
 def test_onboarding_tenant_does_not_receive_echo():
-    """Tenant em onboarding não deve gerar chamada a send_message."""
+    """Tenant em onboarding não deve acionar dispatch_agent."""
     mock_supabase = _make_supabase_mock(tenant_status="onboarding", tenant_id="tenant-onboarding-001")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_send,
-        patch("services.webhook_service.process_message", new_callable=AsyncMock),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock) as mock_dispatch,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(
@@ -130,7 +128,7 @@ def test_onboarding_tenant_does_not_receive_echo():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    mock_send.assert_not_called()
+    mock_dispatch.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -139,20 +137,18 @@ def test_onboarding_tenant_does_not_receive_echo():
 
 
 def test_agent_failure_does_not_affect_http_response():
-    """Falha em process_message não deve alterar o HTTP 200 retornado pelo webhook."""
+    """Falha em dispatch_agent não deve alterar o HTTP 200 retornado pelo webhook."""
     mock_supabase = _make_supabase_mock(tenant_status="active", tenant_id="tenant-active-002")
 
     with (
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.load_conversation_history", return_value=[]),
         patch(
-            "services.webhook_service.process_message",
+            "services.webhook_service.dispatch_agent",
             new_callable=AsyncMock,
             side_effect=Exception("API indisponível"),
         ),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(

@@ -216,7 +216,7 @@ def _post_valid_webhook_and_capture_persist():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._persist_inbound_message", side_effect=capture_persist),
-        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
             client.post(
@@ -243,7 +243,7 @@ def _post_valid_webhook(mock_supabase):
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._persist_inbound_message", side_effect=persist_with_signal),
-        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
             client.post(
@@ -312,7 +312,7 @@ def test_set_tenant_context_called_before_persisting_inbound_message():
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service._persist_inbound_message", side_effect=capture_persist),
-        patch("services.webhook_service._dispatch_agent", new_callable=AsyncMock),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock),
     ):
         with TestClient(_make_app(), raise_server_exceptions=False) as client:
             client.post(
@@ -355,7 +355,7 @@ def test_webhook_returns_200_for_invalid_phone_format():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         response = client.post(
@@ -376,7 +376,7 @@ def test_invalid_phone_format_is_not_persisted():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True),
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock),
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(
@@ -400,7 +400,7 @@ def test_invalid_phone_format_does_not_trigger_echo():
         patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
-        patch("services.webhook_service.deliver_message", new_callable=AsyncMock, return_value=True) as mock_deliver,
+        patch("services.webhook_service.dispatch_agent", new_callable=AsyncMock) as mock_dispatch,
     ):
         client = TestClient(_make_app(), raise_server_exceptions=False)
         client.post(
@@ -409,4 +409,4 @@ def test_invalid_phone_format_does_not_trigger_echo():
             headers={"X-Zapi-Token": VALID_TOKEN},
         )
 
-    mock_deliver.assert_not_called()
+    mock_dispatch.assert_not_called()

@@ -89,20 +89,19 @@ async def test_active_status_dispatches_main_agent():
         return MagicMock()
 
     with (
-        patch("services.webhook_service.asyncio.get_event_loop") as mock_loop,
+        patch("services.webhook_service.asyncio.to_thread", new_callable=AsyncMock, return_value=None),
         patch("services.webhook_service.asyncio.create_task", side_effect=capture_task),
     ):
-        mock_loop.return_value.run_in_executor = AsyncMock(return_value=None)
         await _handle_inbound_message(msg)
 
     # Cancela corrotinas não executadas
     for coro in created_coroutines:
         coro.close()
 
-    # Para active, deve criar task de _dispatch_agent (não onboarding)
+    # Para active, deve criar task de dispatch_agent (não onboarding)
     assert len(created_coroutines) >= 1
     coro_names = [getattr(c, "__qualname__", "") for c in created_coroutines]
-    assert any("_dispatch_agent" in str(n) and "onboarding" not in str(n) for n in coro_names)
+    assert any("dispatch_agent" in str(n) and "onboarding" not in str(n) for n in coro_names)
 
 
 # ---------------------------------------------------------------------------
