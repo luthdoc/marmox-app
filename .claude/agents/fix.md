@@ -70,15 +70,13 @@ Para cada arquivo com achados:
 
 Após todas as correções estarem aplicadas, rode o CI do stack tocado:
 
-**Backend:**
-```bash
-cd backend && python -m pytest tests/ -v
-```
+Leia a seção `## CI Commands` do `CLAUDE.md` do projeto.  
+Se não existir, **pare imediatamente**:
 
-**Frontend:**
-```bash
-cd frontend && npm run lint && npm run typecheck && npm test
-```
+> ⛔ Seção `## CI Commands` não encontrada no `CLAUDE.md`.  
+> Adicione a seção antes de continuar. Formato: `- <label>: <comando>`
+
+Execute todas as entradas em ordem. Reporte resultado por label.
 
 **Se o CI falhar em algo fora dos achados originais:**
 → Não tente corrigir silenciosamente. Reporte no formato PARCIAL com ESCALAR para o achado novo.

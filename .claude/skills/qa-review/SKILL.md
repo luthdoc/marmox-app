@@ -58,9 +58,7 @@ Para cada AC da story, execute o protocolo:
 - [ ] Nenhum teste skipado sem justificativa registrada no Change Log
 
 **Cobertura de Testes**
-- [ ] Execute o CI do stack da story e confirme o número exato de testes reportado:
-      - Backend: `cd backend && python -m pytest tests/ -v`
-      - Frontend: `cd frontend && npm test`
+- [ ] Execute todas as entradas de `## CI Commands` do `CLAUDE.md` (em ordem) e confirme o número exato de testes reportado por label. Se a seção não existir no `CLAUDE.md`: bloqueio imediato.
 - [ ] O número de testes reportado pelo CI **bate com o registrado no Change Log** da story
       (se o Change Log diz "12 passed" e o CI retorna 4, é bloqueio imediato)
 - [ ] Arquivos de teste existem no repositório: `git ls-files backend/tests/` ou `git ls-files frontend/`
@@ -70,11 +68,17 @@ Para cada AC da story, execute o protocolo:
 
 **NFRs do PRD**
 
-Para cada arquivo de produção tocado pela story, verifique os NFRs do `docs/prd.md` que se aplicam:
+Para cada arquivo de produção tocado pela story, aplique os NFRs de `docs/prd.md`:
 
-- [ ] Se a story toca serviços com queries ao banco: `set_tenant_context(tenant_id)` é chamado antes de qualquer operação de leitura ou escrita — confirme no código, não apenas nos testes
-- [ ] Se a story recebe input externo (webhook, API, form): todo campo usado em lógica de negócio ou persistido tem validação de tipo/formato no código
-- [ ] Se a story retorna dados ao cliente: response não expõe campos internos, IDs de outros tenants ou stack traces
+1. Leia a seção "Non-Functional Requirements" de `docs/prd.md`
+2. Para cada NFR que se aplica aos arquivos tocados por esta story:
+   - Leia o campo "Como validar" da integração/serviço correspondente (Seção 4 — Integrações)
+   - Verifique o critério declarado no código, não apenas nos testes
+3. Reporte cada NFR verificado com localização (arquivo:linha) ou bloqueie se ausente
+
+- [ ] Todos os NFRs aplicáveis têm evidência de implementação (arquivo:linha)
+- [ ] Se a story recebe input externo (webhook, API, form): todo campo usado em lógica de negócio tem validação de tipo/formato no código
+- [ ] Se a story retorna dados ao cliente: response não expõe campos internos ou stack traces
 
 > Se qualquer item acima falhar e não existia um AC cobrindo o NFR na story: o bloqueio é duplo — **reportar o bug de implementação E reportar que o AC da story estava incompleto** (para que `to-epic-detail` corrija stories futuras similares).
 
@@ -138,10 +142,10 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] O código implementado satisfaz o AC
 
 **2. CI Completo**
-```bash
-[linter] && [type checker] && [test runner]
-```
-> Adapte ao stack (ex: `npm run lint && npm run typecheck && npm test`, `pytest`, `go test ./...`)
+
+Execute todas as entradas de `## CI Commands` do `CLAUDE.md` em ordem.  
+Se a seção não existir: **bloqueio imediato** — CI não verificável.  
+Reporte resultado por label (ex: `api: ✅ 42 passed | dashboard: ✅ lint ✅ typecheck ✅ 18 passed`).
 
 **3. Complexity (C1–C6)** — ver `rules/complexity.md`
 - [ ] **C1** — Nenhuma função > 20 linhas de lógica
@@ -156,7 +160,8 @@ Execute em ordem. Qualquer item 🔴 ativa o **Protocolo de Bloqueio** imediatam
 - [ ] **T2** — Testes verificam comportamento, não implementação interna
 - [ ] **T3** — Cada teste tem exatamente um motivo para falhar
 - [ ] **T4** — Nome de cada teste descreve comportamento em linguagem de negócio
-- [ ] **T5** — Todos os testes foram confirmados falhando antes da implementação (RED)
+> T5 (confirmação RED) é enforcement do `dev` — verificado via Change Log da story
+> (`RED confirmado: [teste]`), não auditável post-hoc pelo QA.
 - [ ] **T6** — Nenhum teste skipado sem justificativa e item de tech debt
 
 **5. Security (S1–S5)** — ver `rules/security.md`
@@ -241,7 +246,9 @@ Reporte no seguinte formato:
 > **Localização:** [arquivo:linha, story N.M ou AC específico]
 > **Critério violado:** [ex: T3 — cada teste deve ter exatamente um motivo para falhar]
 >
-> **Ação necessária:** `dev` para corrigir antes de retomar o review.
+> **Ação necessária:**
+> - Achados pontuais (lint, cobertura, nomenclatura, cleanliness): use `fix` para correção cirúrgica
+> - Achados de implementação (AC faltando, lógica errada, redesign necessário): use `dev`
 >
 > O review está pausado. Confirme quando corrigido para continuar de onde parou.
 

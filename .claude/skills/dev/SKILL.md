@@ -13,7 +13,7 @@ description: >
 
 # Skill: dev
 
-Você é responsável por implementar uma Story completa. O processo é determinístico: TDD por task, CI gate entre tasks, self-review antes de fechar. **Nenhuma exceção à ordem.**
+Você é responsável por implementar uma Story completa. O processo é estruturado: TDD por task, CI gate entre tasks, self-review antes de fechar.
 
 ---
 
@@ -68,6 +68,7 @@ Antes de qualquer linha de código de produção:
   - ✅ "usuário recebe erro 401 ao acessar rota protegida sem token"
   - ❌ "função `checkAuth` retorna false"
 - Execute o teste e confirme que ele **falha** — se passar, o teste está errado
+- Registre no Change Log da story: `RED confirmado: [nome do teste] falhou conforme esperado` (uma linha por task, não por teste individual)
 
 ### 2. GREEN — Implemente o mínimo necessário
 
@@ -97,16 +98,15 @@ Após GREEN, verifique os gatilhos de refactoring nos **arquivos modificados ou 
 
 Execute o CI do **stack tocado pela task**:
 
-| Stack | Comando |
-|-------|---------|
-| Backend (Python/FastAPI) | `cd backend && python -m pytest tests/ -v` |
-| Frontend (Next.js) | `cd frontend && npm run lint && npm run typecheck && npm test` |
-| Ambos | Execute os dois comandos, na ordem acima |
+Leia a seção `## CI Commands` do `CLAUDE.md` do projeto.  
+Se não existir, **pare imediatamente**:
 
-Se existir `test:fast` no `package.json` do frontend, use entre tasks:
-```bash
-cd frontend && npm run lint && npm run typecheck && npm run test:fast
-```
+> ⛔ Seção `## CI Commands` não encontrada no `CLAUDE.md`.  
+> Adicione a seção antes de continuar. Formato: `- <label>: <comando>`
+
+Execute todas as entradas em ordem. Se houver uma entrada com label sufixado `:fast`
+(ex: `- dashboard:fast: cd frontend && npm run test:fast`), use-a entre tasks no lugar
+da entrada completa correspondente. Reporte resultado por label.
 
 A saída do CI deve ser **copiada verbatim** para o Change Log — não estimada. Ex:
 - `"CI backend: 5 passed"` (de `5 passed in 0.42s` do pytest)
@@ -139,11 +139,7 @@ Se o comando de teste existir mas estiver errado (script ausente no `package.jso
 Quando subagents de tasks paralelas concluírem seus ciclos TDD individuais, **antes de avançar para a próxima task bloqueante**:
 
 1. Integre as mudanças de todos os subagents
-2. Execute o CI completo no código combinado:
-
-```bash
-npm run lint && npm run typecheck && npm test
-```
+2. Execute o CI completo no código combinado (todas as entradas de `## CI Commands` do `CLAUDE.md`, sem variante `:fast`). Se a seção não existir: pare com erro.
 
 Se falhar, trate como CI gate normal (diagnóstico paralelo se múltiplas falhas).
 
@@ -189,11 +185,7 @@ Consolide os relatórios dos subagents. Para cada problema encontrado: corrija a
 
 ## CI Final da Story
 
-Após a self-review, execute o CI completo (não `test:fast`):
-
-```bash
-npm run lint && npm run typecheck && npm test
-```
+Após a self-review, execute o CI completo: todas as entradas de `## CI Commands` do `CLAUDE.md`, sem variante `:fast`. Se a seção não existir: pare com erro.
 
 **Regra:** CI completo ao final de toda story, independente dos CI gates intermediários já executados.
 

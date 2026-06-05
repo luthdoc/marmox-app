@@ -18,7 +18,8 @@ Você é responsável por detalhar **uma Epic por vez** em Stories implementáve
 Antes de começar:
 
 1. **`docs/prd.md`** — obrigatório. Se não existir, instrua o usuário a criar com `to-prd`.
-2. **`docs/architecture.md`** — opcional mas recomendado. Se existir, use para enriquecer as Stories com contexto técnico.
+2. **Repositório remoto** — obrigatório. Execute `git remote -v`. Se não houver remote configurado, instrua o usuário a criar antes de continuar (o Bootstrap do `to-prd` cobre esse passo). Cada Epic cria uma branch que precisa ser pushada.
+3. **`docs/architecture.md`** — opcional mas recomendado. Se existir, use para enriquecer as Stories com contexto técnico.
 
 ---
 
@@ -26,7 +27,7 @@ Antes de começar:
 
 ### Passo 1 — Confirmar a Epic List
 
-Leia `docs/prd.md` e extraia a lista de Epics. Apresente ao usuário:
+Leia `docs/prd.md` e extraia a lista de Epics. Apresente ao usuário para confirmação:
 
 ```
 Epic 1: [Nome] — [goal]
@@ -34,9 +35,9 @@ Epic 2: [Nome] — [goal]
 ...
 ```
 
-Pergunte:
-- A sequência está correta?
-- Há Epics faltando ou redundantes?
+Pergunte apenas: **"A lista está correta para prosseguir?"**
+
+Se o usuário identificar qualquer inconsistência — Epic faltando, ordem errada, goal impreciso — **não corrija aqui**. Instrua a retornar ao `to-prd` para atualizar `docs/prd.md` primeiro. A lista de Epics é domínio exclusivo do PRD.
 
 Só avance após confirmação explícita.
 
@@ -79,6 +80,26 @@ O sub-agente deve receber como contexto:
 
 ---
 
+## Epic de Go-Live — Regras Especiais
+
+Quando a Epic sendo detalhada for a última do PRD (Epic de Go-Live), o sub-agente segue um processo diferente:
+
+**1. Leia a Seção 4 do PRD integralmente** — especialmente o bloco "Integrações e Serviços Externos". Cada entrada com campo "Como validar" é um contrato: a Epic precisa entregar aquela validação com dados reais, não mocks.
+
+**2. Derive as Stories a partir do contexto do projeto**, não de uma lista fixa. Perguntas que guiam a derivação:
+- Há banco de dados? → Story de migrations em produção
+- Há variáveis de ambiente por serviço? → Story de configuração de ambiente
+- Há serviços externos com "Como validar"? → Uma Story por integração que não tenha sido validada end-to-end nas Epics anteriores
+- Há fluxo principal do produto que ainda não foi testado com dados reais? → Story de smoke test
+
+**3. Critério de conclusão da Epic**: um usuário real consegue executar o fluxo principal do produto. Não é "o código está correto", não é "os testes passam". É uso real.
+
+**4. Não herde stories de outras Epics**: se uma integração foi implementada mas nunca validada com dados reais em produção, ela pertence aqui. Se já foi validada, não repita.
+
+**5. Override da regra "evite enablers puros"**: para a Epic de Go-Live, stories operacionais sem entrega de feature nova (configurar ambiente, rodar migrations, registrar webhooks) são esperadas e válidas. O valor entregue é o sistema funcionando — não uma feature.
+
+---
+
 ## Regras de Stories
 
 **Sequenciamento:**
@@ -104,9 +125,10 @@ O sub-agente deve receber como contexto:
 Antes de escrever os ACs de cada Story, releia todos os NFRs do `docs/prd.md` e verifique quais têm implicação técnica na story em questão. Para cada NFR relevante, crie um AC explícito na story — nunca deixe o NFR apenas como Technical Note.
 
 Exemplos de mapeamento obrigatório:
-- Story que faz queries ao banco → AC explícito: "Antes de qualquer query, `set_tenant_context(tenant_id)` é chamado com o tenant_id correto, garantindo enforcement de RLS (NFR de isolamento)"
-- Story que recebe input externo → AC explícito: "Todo campo de input externo é validado antes de ser processado (formato, tipo, limites)"
-- Story que retorna dados ao cliente → AC explícito: "Response contém apenas os campos necessários — nenhum dado interno ou de outro tenant é exposto"
+- Story que faz queries ao banco com NFR de isolamento → AC explícito: "Queries retornam apenas dados do contexto correto — nenhum dado de outro contexto é acessível"
+- Story que recebe input externo com NFR de validação → AC explícito: "Todo campo de input externo é validado antes de ser processado (formato, tipo, limites)"
+- Story que retorna dados ao cliente com NFR de segurança → AC explícito: "Response contém apenas os campos necessários — nenhum dado interno é exposto"
+- Story com NFR de performance → AC explícito: "Operação completa dentro do limite definido no NFR (ex: p95 < Xms)"
 
 Technical Notes são contexto de implementação, não contrato. O AC é o único input que o agente `dev` usa como contrato — se o NFR não virar AC, não será implementado nem testado.
 
@@ -178,9 +200,8 @@ so that [benefício concreto].
 
 ## Regras para Tasks
 
-- Uma Task = um ciclo RED → GREEN → REFACTOR
-- Granularidade: 30-60 minutos de trabalho focado
-- Cada Task deve ter um comportamento testável claro
+- Granularidade: uma unidade de trabalho focado e entregável (referência: 30-60 minutos)
+- Cada Task descreve **o que construir**, não como — a metodologia de implementação é responsabilidade da skill `dev`
 - Tasks fundamentais (que outras dependem) vêm primeiro
 - Tasks de infraestrutura/config vêm antes de Tasks de lógica de negócio
 

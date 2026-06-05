@@ -103,15 +103,13 @@ Aguarde a conclusão. Registre o resultado:
 
 Após run-story reportar conclusão da story, execute o CI completo:
 
-**Backend:**
-```bash
-cd backend && python -m pytest tests/ -v 2>&1 | tail -5
-```
+Leia a seção `## CI Commands` do `CLAUDE.md` do projeto.  
+Se não existir, **pare imediatamente**:
 
-**Frontend:**
-```bash
-cd frontend && npm run lint && npm run typecheck && npm test 2>&1 | tail -10
-```
+> ⛔ Seção `## CI Commands` não encontrada no `CLAUDE.md`.  
+> Adicione a seção antes de continuar. Formato: `- <label>: <comando>`
+
+Execute todas as entradas em ordem. Reporte resultado por label.
 
 **Se o número de testes passar** (igual ou maior que `ci_baseline`):
 - Atualize `ci_baseline` com o novo total

@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CI Commands
+
+- api: cd backend && python -m pytest tests/ -v
+- dashboard: cd frontend && npm run lint && npm run typecheck && npm test
+
 ## Project Overview
 
 Marmax is a WhatsApp AI agent SaaS for marble/stone companies (marmorarias). The agent handles 24/7 lead qualification, visit scheduling, and follow-up automation. Sold at R$ 297/month + R$ 500 setup.
@@ -27,7 +32,7 @@ uvicorn main:app --reload          # dev server (port 8000)
 uvicorn main:app --host 0.0.0.0    # production
 ```
 
-Key responsibilities: receive Z-API webhooks, orchestrate Claude (Haiku/Sonnet cascade), persist to Supabase, run follow-up scheduler.
+Key responsibilities: receive Evolution API webhooks, orchestrate Claude (Haiku/Sonnet cascade), persist to Supabase, run follow-up scheduler.
 
 ## Frontend (Next.js)
 
@@ -46,16 +51,16 @@ Dashboard purpose: data management only — lets owners view leads and edit agen
 ### Message Flow
 
 ```
-WhatsApp lead → Z-API webhook → POST /webhook/whatsapp
-                                        ↓
-                              Agent orchestration service
-                                  ↓           ↓
-                            Claude Haiku   Claude Sonnet
-                            (simple tasks) (complex + Vision)
-                                        ↓
-                                   Supabase
-                                        ↓
-                            Z-API → WhatsApp response
+WhatsApp lead → Evolution API webhook → POST /webhook/whatsapp
+                                                ↓
+                                      Agent orchestration service
+                                          ↓           ↓
+                                    Claude Haiku   Claude Sonnet
+                                    (simple tasks) (complex + Vision)
+                                                ↓
+                                           Supabase
+                                                ↓
+                                Evolution API → WhatsApp response
 ```
 
 ### Multi-tenancy
@@ -71,7 +76,12 @@ Every database table has a `tenant_id` column. Row Level Security (RLS) is enfor
 
 ### WhatsApp Integration
 
-Z-API or Evolution API self-hosted connects to the marble company's existing number via QR code. Webhook endpoint receives all inbound messages. Never use the official Meta API in MVP.
+**Evolution API self-hosted** connects each tenant's WhatsApp number via QR code. Runs on a single VPS — custo fixo independente do número de tenants.
+
+- Cada tenant tem sua própria `instance_name` criada via API no onboarding
+- `instance_name` e `api_key` ficam armazenados na tabela `tenants` no Supabase
+- Webhook configurado por instância aponta para `POST /webhook/whatsapp?tenant_id=<id>`
+- Nunca usar a Meta API oficial no MVP
 
 ### Follow-up Scheduler
 
@@ -97,8 +107,8 @@ See `.env.example` (to be created in `backend/`). Required:
 SUPABASE_URL
 SUPABASE_SERVICE_KEY
 ANTHROPIC_API_KEY
-ZAPI_INSTANCE_ID
-ZAPI_TOKEN
+EVOLUTION_API_URL        # ex: https://evo.seudominio.com
+EVOLUTION_API_KEY        # global API key do servidor Evolution
 ```
 
 ## Design System

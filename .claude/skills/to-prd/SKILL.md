@@ -10,7 +10,7 @@ description: >
   "documenta os requisitos", "vamos escrever o PRD", "quero o PRD" ou qualquer variação.
   Também acione quando um novo projeto ou feature precisa ser formalizado em documento
   antes de partir para arquitetura ou código. NÃO detalha Stories dentro das Epics —
-  isso é responsabilidade da skill eng-epic.
+  isso é responsabilidade da skill to-epic-detail.
 ---
 
 # Skill: to-prd
@@ -87,6 +87,36 @@ Decisões técnicas que vão guiar a arquitetura. Registre com rationale, não s
 - **Testing Requirements**: nível de cobertura esperado (unit, integration, E2E, manual)
 - **Additional Assumptions**: qualquer outra premissa técnica relevante que surgir durante a elicitação
 
+#### Integrações e Serviços Externos
+
+Para **cada serviço externo** (APIs de terceiros, provedores de infra, SDKs externos) que o projeto vai usar:
+
+```
+Serviço: [nome da categoria — ex: "Envio de mensagens WhatsApp"]
+Escolha definitiva: [nome do serviço/biblioteca — ex: "Evolution API (self-hosted)"]
+Alternativas descartadas: [ex: "Z-API (custo variável por tenant), Meta API oficial (complexidade de aprovação)"]
+Rationale: [por que esta escolha — ex: "custo fixo independente do número de tenants, controle total do servidor"]
+Como validar: [critério concreto de que está funcionando — ex: "webhook recebe mensagem real e resposta é entregue no WhatsApp"]
+```
+
+**Regras:**
+- Cada categoria tem exatamente uma escolha — nunca "X ou Y"
+- Se há dúvida real entre duas opções, resolva aqui com uma pergunta ao usuário antes de avançar
+- A coluna "Como validar" é obrigatória — define o que "funcionando" significa para aquele serviço
+
+#### Stack Técnico
+
+| Camada | Tecnologia | Diretório |
+|--------|-----------|-----------|
+| [ex: Backend] | [ex: Python + FastAPI] | [ex: backend/] |
+| [ex: Frontend] | [ex: Next.js + TypeScript] | [ex: frontend/] |
+
+**Regras:**
+- Uma linha por camada executável independente
+- Diretório é o path relativo à raiz do repositório
+- Se for monolito (sem subdivisões): uma linha apenas
+- Esta tabela é a fonte que `/init` usa para gerar `## CI Commands` no `CLAUDE.md`
+
 ---
 
 ### Seção 5 — Epic List (alto nível)
@@ -100,6 +130,13 @@ Liste todas as Epics com título + 1 frase de goal. Apresente ao usuário para a
 - Cada Epic posterior constrói sobre o anterior — sem gaps ou dependências reversas
 - Cross-cutting concerns (auth, logging, monitoring, error handling) fluem através dos epics desde o início, **nunca** são o último Epic
 - Erro para o lado de **menos Epics**: se algo parece grande demais, questione antes de dividir
+- **A última Epic SEMPRE é a Epic de Go-Live**: cobre tudo que é necessário para o sistema estar de pé e funcionando em produção de verdade — não apenas "código implementado"
+
+#### Epic de Go-Live (sempre a última)
+
+O critério de conclusão desta Epic é: **um usuário real consegue usar o produto de ponta a ponta**. Não é "o código está correto" nem "os testes passam".
+
+O detalhamento das Stories (o quê configurar, o quê testar, como validar cada integração) é responsabilidade da skill `to-epic-detail`, que vai derivar as tasks a partir das integrações e critérios "Como validar" definidos na Seção 4.
 
 **Formato:**
 ```
@@ -107,15 +144,14 @@ Epic 1: [Nome] — [goal em 1 frase]
 Epic 2: [Nome] — [goal em 1 frase]
 ```
 
-O detalhamento de cada Epic em Stories é responsabilidade da skill `eng-epic`. Não vá além da lista aqui.
+O detalhamento de cada Epic em Stories é responsabilidade da skill `to-epic-detail`. Não vá além da lista aqui.
 
 ---
 
 ### Seção 6 — Next Steps
 
-Dois prompts curtos ao final:
-- **UX Expert Prompt**: instrução curta para iniciar criação do documento de UI/UX com este PRD como input
-- **Architect Prompt**: instrução curta para iniciar criação da arquitetura com este PRD como input
+Um prompt curto ao final:
+- **UX Expert Prompt**: instrução curta para iniciar criação do documento de UI/UX com este PRD como input *(somente se o projeto tiver UX/UI)*
 
 ---
 
@@ -128,6 +164,10 @@ Antes de salvar, faça uma passagem verificando:
 - [ ] A sequência de Epics é lógica e sem gaps?
 - [ ] A Epic 1 estabelece infraestrutura E entrega algo deployável?
 - [ ] Cross-cutting concerns estão distribuídos, não concentrados no final?
+- [ ] Cada serviço externo na Seção 4 tem escolha única, rationale e critério de validação?
+- [ ] Não há nenhuma categoria de integração com duas opções em aberto ("X ou Y")?
+- [ ] A última Epic é uma Epic de Go-Live cujo critério de sucesso é um usuário real conseguir usar o produto?
+- [ ] Stack Técnico tem uma linha por camada com Tecnologia e Diretório preenchidos?
 
 Se qualquer item falhar, corrija antes de salvar.
 
@@ -139,17 +179,15 @@ Após salvar o PRD, verifique se o repositório remoto está configurado:
 git remote -v
 ```
 
-Se **não houver remote**:
+Se **não houver remote**, crie agora — o remote precisa existir antes de detalhar a primeira Epic:
 
 ```bash
 gh repo create [nome-do-projeto] --private --source=. --push
 ```
 
-Use o nome do projeto em kebab-case (ex: `marmox-app`). O `--source=.` usa o diretório atual e `--push` faz o push inicial automaticamente.
+Use o nome do projeto em kebab-case. O `--source=.` usa o diretório atual e `--push` faz o push inicial.
 
 Se **já houver remote configurado**: pule esta etapa.
-
-> O remote deve existir antes da primeira Epic ser detalhada — cada Epic cria uma branch que precisa ser pushada ao longo do desenvolvimento.
 
 ## Saída
 
@@ -159,6 +197,4 @@ Ao finalizar, informe:
 > ✅ PRD salvo em `docs/prd.md`.
 > Repositório remoto: [configurado | criado agora em github.com/user/repo]
 >
-> Próximos passos sugeridos:
-> - `eng-architect` para criar o documento de arquitetura com base neste PRD.
-> - `to-epic-detail` para quebrar cada Epic em Stories implementáveis.
+> Próximo passo: `to-epic-detail` para detalhar cada Epic em Stories implementáveis.
