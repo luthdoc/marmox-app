@@ -86,8 +86,8 @@ _FAKE_ENV = {
     "SUPABASE_URL": "https://fake.supabase.co",
     "SUPABASE_SERVICE_KEY": "fake-service-key",
     "ANTHROPIC_API_KEY": "fake-anthropic-key",
-    "ZAPI_INSTANCE_ID": "fake-instance",
-    "ZAPI_TOKEN": "fake-token",
+    "META_WHATSAPP_ACCESS_TOKEN": "EAABs-fake-token",
+    "META_WHATSAPP_VERIFY_TOKEN": "fake-verify-token",
 }
 
 # ---------------------------------------------------------------------------

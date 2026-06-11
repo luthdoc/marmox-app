@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
-from schemas.webhook import ZApiWebhookPayload
 from services.webhook_service import (
     _handle_inbound_message,
     InboundMessage,

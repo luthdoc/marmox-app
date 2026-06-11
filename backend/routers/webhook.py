@@ -1,19 +1,18 @@
 """
-Router de webhook do Z-API (Story 2.2).
+Router de webhook da Meta WhatsApp Cloud API.
 
-Recebe eventos POST do Z-API em /webhook/whatsapp,
-faz parse do payload e delega ao webhook_service.
-O router não contém lógica de negócio.
+GET  /webhook/whatsapp — verificação inicial do webhook (hub.challenge)
+POST /webhook/whatsapp — recebe eventos de mensagem e delega ao webhook_service
 """
 from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from core.config import Settings
-from schemas.webhook import ZApiWebhookPayload
+from schemas.webhook import MetaWebhookPayload
 from services.webhook_service import process_inbound_message
 
 router = APIRouter()
@@ -21,33 +20,37 @@ router = APIRouter()
 
 @lru_cache(maxsize=1)
 def _get_settings() -> Settings:
-    """Retorna o singleton de configuração (instanciado uma única vez no primeiro uso)."""
     return Settings()
 
 
-def _get_expected_token() -> str:
-    """Retorna o token Z-API esperado, lido do singleton de configuração."""
-    return _get_settings().zapi_token
+@router.get("/webhook/whatsapp")
+async def verify_webhook(
+    hub_mode: str = Query(alias="hub.mode", default=""),
+    hub_verify_token: str = Query(alias="hub.verify_token", default=""),
+    hub_challenge: str = Query(alias="hub.challenge", default=""),
+) -> PlainTextResponse:
+    """Verificação inicial do webhook exigida pela Meta.
+
+    A Meta envia um GET com hub.mode=subscribe e hub.verify_token para confirmar
+    que o endpoint é válido. Retorna hub.challenge em texto plano se o token bater.
+    """
+    settings = _get_settings()
+    if hub_mode == "subscribe" and hub_verify_token == settings.meta_whatsapp_verify_token:
+        return PlainTextResponse(hub_challenge)
+    raise HTTPException(status_code=403, detail="Verify token inválido")
 
 
 @router.post("/webhook/whatsapp")
-async def receive_whatsapp_webhook(
-    request: Request,
-    x_zapi_token: str | None = Header(default=None),
-) -> JSONResponse:
-    """Recebe eventos de webhook do Z-API.
+async def receive_whatsapp_webhook(request: Request) -> JSONResponse:
+    """Recebe eventos de mensagem da Meta WhatsApp Cloud API.
 
-    Valida o token de autenticação e delega o processamento ao service.
-    Retorna 200 para payloads válidos (mesmo que ignorados por tipo).
-    Retorna 401 para token ausente ou inválido.
+    Itera sobre todas as mensagens do payload e delega cada uma ao service.
+    Retorna 200 imediatamente (a Meta exige resposta rápida).
     """
     body = await request.json()
-    payload = ZApiWebhookPayload.model_validate(body)
-    expected_token = _get_expected_token()
+    payload = MetaWebhookPayload.model_validate(body)
 
-    try:
-        service_response = await process_inbound_message(payload, x_zapi_token, expected_token)
-    except PermissionError:
-        raise HTTPException(status_code=401, detail="Token inválido ou ausente")
+    for phone_number_id, message in payload.get_messages():
+        await process_inbound_message(phone_number_id, message)
 
-    return JSONResponse(content=service_response)
+    return JSONResponse(content={"received": True})

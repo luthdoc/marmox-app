@@ -2,48 +2,49 @@
 Testes de roteamento Haiku→Sonnet (Story 3.5, AC 5, 6, 7, 8).
 
 Cenários cobertos:
-- Payload com imageMessage → process_message chamado com image_url e model=Sonnet
+- Payload com imageMessage → dispatch_agent chamado com image_url e model=Sonnet
 - Texto com palavra de reclamação → model=Sonnet
 - Texto simples → model=Haiku (default)
 """
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, call, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-VALID_TOKEN = "test-zapi-token"
+VALID_PHONE_NUMBER_ID = "1220170564507810"
+TENANT_ID = "tenant-routing-001"
+PHONE = "5511999999999"
+IMAGE_URL = "img_media_id_abc123"
 
 IMAGE_PAYLOAD = {
-    "instanceId": "instance-active",
-    "type": "ReceivedCallback",
-    "phone": "5511999999999",
-    "imageMessage": {"url": "https://media.z-api.io/img/abc123.jpg", "caption": ""},
-    "momment": 1234567890,
+    "object": "whatsapp_business_account",
+    "entry": [{
+        "id": "WABA123",
+        "changes": [{
+            "value": {
+                "messaging_product": "whatsapp",
+                "metadata": {
+                    "display_phone_number": "15550000000",
+                    "phone_number_id": VALID_PHONE_NUMBER_ID,
+                },
+                "messages": [{
+                    "from": PHONE,
+                    "id": "wamid.img001",
+                    "timestamp": "1234567890",
+                    "type": "image",
+                    "image": {"id": IMAGE_URL, "caption": ""},
+                }],
+            },
+            "field": "messages",
+        }],
+    }],
 }
 
-COMPLAINT_PAYLOAD = {
-    "instanceId": "instance-active",
-    "type": "ReceivedCallback",
-    "phone": "5511999999999",
-    "text": {"message": "Estou com problema no pedido"},
-    "momment": 1234567890,
-}
-
-SIMPLE_PAYLOAD = {
-    "instanceId": "instance-active",
-    "type": "ReceivedCallback",
-    "phone": "5511999999999",
-    "text": {"message": "Quero um orçamento"},
-    "momment": 1234567890,
-}
-
-TENANT_ACTIVE = {"id": "tenant-routing-001", "status": "active", "name": "Marmoraria Teste"}
+TENANT_ACTIVE = {"id": TENANT_ID, "status": "active", "name": "Marmoraria Teste"}
 
 
 def _make_app() -> FastAPI:
@@ -61,12 +62,12 @@ def _make_supabase_mock(tenant: dict = TENANT_ACTIVE) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# AC 8 — imageMessage → process_message chamado com image_url e model=Sonnet
+# AC 8 — imageMessage → dispatch_agent chamado com image_url
 # ---------------------------------------------------------------------------
 
 
 def test_image_message_routes_to_sonnet():
-    """Payload com imageMessage deve chamar process_message com model=Sonnet e image_url."""
+    """Payload com imageMessage deve chamar dispatch_agent com image_url."""
     import threading
 
     mock_supabase = _make_supabase_mock()
@@ -78,7 +79,6 @@ def test_image_message_routes_to_sonnet():
         dispatch_event.set()
 
     with (
-        patch("routers.webhook._get_expected_token", return_value=VALID_TOKEN),
         patch("services.webhook_service.get_client", return_value=mock_supabase),
         patch("services.webhook_service.set_tenant_context"),
         patch("services.webhook_service.dispatch_agent", side_effect=fake_dispatch),
@@ -87,12 +87,11 @@ def test_image_message_routes_to_sonnet():
             client.post(
                 "/webhook/whatsapp",
                 json=IMAGE_PAYLOAD,
-                headers={"X-Zapi-Token": VALID_TOKEN},
             )
             dispatch_event.wait(timeout=3.0)
 
     assert len(dispatched) == 1
-    assert dispatched[0]["image_url"] == "https://media.z-api.io/img/abc123.jpg"
+    assert dispatched[0]["image_url"] == IMAGE_URL
 
 
 def test_image_message_process_message_uses_sonnet():
@@ -103,7 +102,6 @@ def test_image_message_process_message_uses_sonnet():
         process_calls.append(kwargs)
         return "Resposta do Sonnet [DADOS_LEAD]\n{}\n[/DADOS_LEAD]"
 
-    mock_supabase = _make_supabase_mock()
     lead = {"id": "lead-uuid", "status": "new"}
     context = {}
     history = []
@@ -120,14 +118,14 @@ def test_image_message_process_message_uses_sonnet():
             _run_dispatch_agent_with_image(
                 "tenant-001",
                 "Marmoraria",
-                "5511999999999",
-                "https://media.z-api.io/img/abc123.jpg",
+                PHONE,
+                IMAGE_URL,
             )
         )
 
     assert len(process_calls) == 1
     assert process_calls[0]["model"] == "claude-sonnet-4-6"
-    assert process_calls[0]["image_url"] == "https://media.z-api.io/img/abc123.jpg"
+    assert process_calls[0]["image_url"] == IMAGE_URL
 
 
 async def _run_dispatch_agent_with_image(tenant_id, tenant_name, phone, image_url):
@@ -162,7 +160,7 @@ def test_complaint_text_routes_to_sonnet():
             _run_dispatch_agent_text(
                 "tenant-001",
                 "Marmoraria",
-                "5511999999999",
+                PHONE,
                 "Estou com problema no meu pedido",
             )
         )
@@ -193,7 +191,7 @@ def test_simple_text_routes_to_haiku():
             _run_dispatch_agent_text(
                 "tenant-001",
                 "Marmoraria",
-                "5511999999999",
+                PHONE,
                 "Quero um orçamento de granito preto",
             )
         )
@@ -208,46 +206,49 @@ async def _run_dispatch_agent_text(tenant_id, tenant_name, phone, text):
 
 
 # ---------------------------------------------------------------------------
-# AC 7 — Schema reconhece imageMessage
+# AC 7 — Schema reconhece imageMessage (MetaMessage)
 # ---------------------------------------------------------------------------
 
 
 def test_schema_recognizes_image_message():
-    """ZApiWebhookPayload deve expor is_image_message=True para payload com imageMessage."""
-    from schemas.webhook import ZApiWebhookPayload
+    """MetaMessage deve expor is_image_message=True para payload com type=image."""
+    from schemas.webhook import MetaMessage
 
-    payload = ZApiWebhookPayload(
-        instanceId="inst-1",
-        type="ReceivedCallback",
-        phone="5511999999999",
-        imageMessage={"url": "https://example.com/img.jpg", "caption": "foto"},
-    )
-    assert payload.is_image_message is True
-    assert payload.image_url == "https://example.com/img.jpg"
+    msg = MetaMessage.model_validate({
+        "from": "5511999999999",
+        "id": "wamid.001",
+        "timestamp": "1234567890",
+        "type": "image",
+        "image": {"id": "img_media_id_abc123", "caption": "foto"},
+    })
+    assert msg.is_image_message is True
+    assert msg.image_url == "img_media_id_abc123"
 
 
 def test_schema_image_url_none_when_no_image():
-    """ZApiWebhookPayload deve expor image_url=None para mensagens de texto."""
-    from schemas.webhook import ZApiWebhookPayload
+    """MetaMessage deve expor image_url=None para mensagens de texto."""
+    from schemas.webhook import MetaMessage
 
-    payload = ZApiWebhookPayload(
-        instanceId="inst-1",
-        type="ReceivedCallback",
-        phone="5511999999999",
-        text={"message": "olá"},
-    )
-    assert payload.is_image_message is False
-    assert payload.image_url is None
+    msg = MetaMessage.model_validate({
+        "from": "5511999999999",
+        "id": "wamid.001",
+        "timestamp": "1234567890",
+        "type": "text",
+        "text": {"body": "olá"},
+    })
+    assert msg.is_image_message is False
+    assert msg.image_url is None
 
 
 def test_schema_is_image_message_false_for_text():
-    """ZApiWebhookPayload.is_image_message deve ser False para mensagens de texto."""
-    from schemas.webhook import ZApiWebhookPayload
+    """MetaMessage.is_image_message deve ser False para mensagens de texto."""
+    from schemas.webhook import MetaMessage
 
-    payload = ZApiWebhookPayload(
-        instanceId="inst-1",
-        type="ReceivedCallback",
-        phone="5511999999999",
-        text={"message": "Quero um orçamento"},
-    )
-    assert payload.is_image_message is False
+    msg = MetaMessage.model_validate({
+        "from": "5511999999999",
+        "id": "wamid.001",
+        "timestamp": "1234567890",
+        "type": "text",
+        "text": {"body": "Quero um orçamento"},
+    })
+    assert msg.is_image_message is False

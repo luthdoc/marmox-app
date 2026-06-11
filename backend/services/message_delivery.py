@@ -1,10 +1,10 @@
-"""Entrega canônica de mensagens outbound: send via Z-API + persist em messages."""
+"""Entrega canônica de mensagens outbound: send via Evolution API + persist em messages."""
 from __future__ import annotations
 
 import asyncio
 
 from db.conversation import persist_outbound_message
-from services.zapi_client import send_message
+from services.meta_client import send_message
 
 
 async def deliver_message(
