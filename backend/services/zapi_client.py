@@ -1,17 +1,17 @@
 """
-Serviço de envio de mensagens via Z-API (Story 2.3).
+Envio de mensagens via Evolution API.
 
 Responsabilidades:
-- Lookup de credenciais do tenant na tabela tenants (com cache de 30s)
-- Envio de mensagens via POST para o endpoint Z-API de texto
+- Lookup de evolution_instance_name do tenant (com cache de 30s)
+- Envio de mensagens via POST para o endpoint Evolution API de texto
 - Retry exponencial: até 3 tentativas com backoff 1s, 2s, 4s
 - Logging estruturado para cada tentativa e resultado final
-- Persistência da mensagem outbound em messages após envio bem-sucedido
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import TypedDict
@@ -28,47 +28,47 @@ logger = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 30
 
-# Estrutura: { tenant_id: (zapi_instance_id, zapi_token, cached_at_monotonic) }
-_tenant_credential_cache: dict[str, tuple[str, str, float]] = {}
+# Estrutura: { tenant_id: (evolution_instance_name, cached_at_monotonic) }
+_tenant_credential_cache: dict[str, tuple[str, float]] = {}
 
 
 class TenantCredentials(TypedDict):
-    zapi_instance_id: str
-    zapi_token: str
+    evolution_instance_name: str
 
 
-def _parse_tenant_credentials(row: dict) -> tuple[str, str]:
-    """Extrai instance_id e token do row do banco; lança ValueError se ausentes."""
-    instance_id = row.get("zapi_instance_id")
-    token = row.get("zapi_token")
-    if not instance_id or not token:
-        raise ValueError("Credenciais Z-API ausentes no tenant")
-    return instance_id, token
+def _parse_tenant_credentials(row: dict) -> str:
+    instance_name = row.get("evolution_instance_name")
+    if not instance_name:
+        raise ValueError("evolution_instance_name ausente no tenant")
+    return instance_name
 
 
 def _lookup_cached_credentials(tenant_id: str, now: float) -> TenantCredentials | None:
-    """Retorna credenciais do cache se ainda válidas; None caso contrário."""
     cached = _tenant_credential_cache.get(tenant_id)
     if cached is not None:
-        instance_id, token, cached_at = cached
+        instance_name, cached_at = cached
         if now - cached_at < _CACHE_TTL_SECONDS:
-            return {"zapi_instance_id": instance_id, "zapi_token": token}
+            return {"evolution_instance_name": instance_name}
     return None
 
 
 def _fetch_and_cache_credentials(tenant_id: str, now: float) -> TenantCredentials | None:
-    """Busca credenciais no banco, armazena no cache e retorna; None se não encontrado."""
     client = get_client()
-    result = client.table("tenants").select("zapi_instance_id, zapi_token").eq("id", tenant_id).execute()
+    result = (
+        client.table("tenants")
+        .select("evolution_instance_name")
+        .eq("id", tenant_id)
+        .execute()
+    )
     if not result.data:
         return None
-    instance_id, token = _parse_tenant_credentials(result.data[0])
-    _tenant_credential_cache[tenant_id] = (instance_id, token, now)
-    return {"zapi_instance_id": instance_id, "zapi_token": token}
+    instance_name = _parse_tenant_credentials(result.data[0])
+    _tenant_credential_cache[tenant_id] = (instance_name, now)
+    return {"evolution_instance_name": instance_name}
 
 
 def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
-    """Retorna as credenciais Z-API do tenant, usando cache de 30s."""
+    """Retorna evolution_instance_name do tenant, usando cache de 30s."""
     now = time.monotonic()
     cached = _lookup_cached_credentials(tenant_id, now)
     if cached is not None:
@@ -81,7 +81,6 @@ def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
 # ---------------------------------------------------------------------------
 
 _MAX_ATTEMPTS = 3
-_ZAPI_BASE_URL = "https://api.z-api.io/instances/{instance_id}/token/{token}/send-text"
 
 
 @dataclass
@@ -94,6 +93,7 @@ class OutboundMessage:
 @dataclass
 class SendContext:
     url: str
+    headers: dict
     payload: dict
     tenant_id: str
     phone: str
@@ -101,9 +101,8 @@ class SendContext:
 
 
 def _log_send_success(ctx: SendContext, attempt: int) -> None:
-    """Loga tentativa de envio bem-sucedida."""
     logger.info(
-        "Tentativa de envio Z-API",
+        "Mensagem enviada via Evolution API",
         extra={
             "tenant_id": ctx.tenant_id,
             "phone": ctx.phone,
@@ -115,7 +114,6 @@ def _log_send_success(ctx: SendContext, attempt: int) -> None:
 
 
 def _log_send_failure(ctx: SendContext, attempt: int, error: str | None = None) -> None:
-    """Loga tentativa de envio com falha."""
     extra: dict = {
         "tenant_id": ctx.tenant_id,
         "phone": ctx.phone,
@@ -125,7 +123,7 @@ def _log_send_failure(ctx: SendContext, attempt: int, error: str | None = None) 
     }
     if error is not None:
         extra["error"] = error
-    label = "Tentativa de envio Z-API — erro de rede" if error else "Tentativa de envio Z-API"
+    label = "Evolution API — erro de rede" if error else "Evolution API — resposta não-2xx"
     logger.warning(label, extra=extra)
 
 
@@ -134,13 +132,8 @@ async def _attempt_post(
     ctx: SendContext,
     attempt: int,
 ) -> bool:
-    """Executa uma tentativa de POST ao Z-API e loga o resultado.
-
-    Returns:
-        True se a tentativa foi bem-sucedida (HTTP 2xx), False caso contrário.
-    """
     try:
-        response = await http_client.post(ctx.url, json=ctx.payload)
+        response = await http_client.post(ctx.url, json=ctx.payload, headers=ctx.headers)
         success = response.status_code < 300
         if success:
             _log_send_success(ctx, attempt)
@@ -153,11 +146,6 @@ async def _attempt_post(
 
 
 async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
-    """Executa loop de retry com backoff exponencial (até 3 tentativas).
-
-    Returns:
-        True se alguma tentativa foi bem-sucedida, False caso contrário.
-    """
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         success = await _attempt_post(http_client, ctx, attempt)
         if success:
@@ -167,16 +155,15 @@ async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
     return False
 
 
-def _build_send_context(
-    credentials: TenantCredentials, msg: OutboundMessage
-) -> SendContext:
-    """Constrói o SendContext a partir das credenciais e do OutboundMessage."""
-    instance_id = credentials["zapi_instance_id"]
-    token = credentials["zapi_token"]
-    url = _ZAPI_BASE_URL.format(instance_id=instance_id, token=token)
+def _build_send_context(credentials: TenantCredentials, msg: OutboundMessage) -> SendContext:
+    instance_name = credentials["evolution_instance_name"]
+    base_url = os.environ.get("EVOLUTION_API_URL", "")
+    api_key = os.environ.get("EVOLUTION_API_KEY", "")
+    url = f"{base_url}/message/sendText/{instance_name}"
     return SendContext(
         url=url,
-        payload={"phone": msg.phone, "message": msg.text},
+        headers={"apikey": api_key},
+        payload={"number": msg.phone, "text": msg.text},
         tenant_id=msg.tenant_id,
         phone=msg.phone,
         text=msg.text,
@@ -184,7 +171,6 @@ def _build_send_context(
 
 
 def _log_tenant_not_found(tenant_id: str, phone: str) -> None:
-    """Loga erro de tenant não encontrado ao tentar enviar mensagem."""
     logger.error(
         "Tenant não encontrado para envio de mensagem",
         extra={"tenant_id": tenant_id, "phone": phone},
@@ -192,9 +178,8 @@ def _log_tenant_not_found(tenant_id: str, phone: str) -> None:
 
 
 def _log_send_exhausted(tenant_id: str, phone: str) -> None:
-    """Loga erro de esgotamento de tentativas de envio Z-API."""
     logger.error(
-        "Falha ao enviar mensagem Z-API após todas as tentativas",
+        "Falha ao enviar mensagem via Evolution API após todas as tentativas",
         extra={
             "tenant_id": tenant_id,
             "phone": phone,
@@ -204,10 +189,7 @@ def _log_send_exhausted(tenant_id: str, phone: str) -> None:
 
 
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
-    """Envia uma mensagem WhatsApp via Z-API com retry exponencial.
-
-    Responsabilidade: HTTP + retry + logging apenas.
-    Persistência em messages é responsabilidade do chamador via deliver_message.
+    """Envia mensagem WhatsApp via Evolution API com retry exponencial.
 
     Args:
         tenant_id: UUID do tenant que envia a mensagem.
