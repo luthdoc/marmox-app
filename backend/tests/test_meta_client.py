@@ -1,5 +1,5 @@
 """
-Testes para o serviço de envio de mensagens via Evolution API (Story 2.3).
+Testes para o serviço de envio de mensagens via Meta WhatsApp Cloud API.
 
 Cobre:
 - Envio bem-sucedido (mock HTTP 200)
@@ -12,33 +12,26 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-_EVO_ENV = {
-    "EVOLUTION_API_URL": "https://fake-evolution.up.railway.app",
-    "EVOLUTION_API_KEY": "fake-api-key",
+_META_ENV = {
+    "META_WHATSAPP_ACCESS_TOKEN": "EAABs-test-token",
+    "META_WHATSAPP_VERIFY_TOKEN": "verify-token-test",
 }
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-def _make_supabase_client(evolution_instance_name="marmoraria-teste"):
-    """Retorna um mock do cliente Supabase com tenant válido."""
+def _make_supabase_client(phone_number_id="1220170564507810"):
+    """Retorna mock do cliente Supabase com tenant válido."""
     tenant_row = {
         "id": "tenant-uuid-001",
-        "evolution_instance_name": evolution_instance_name,
+        "whatsapp_phone_number_id": phone_number_id,
     }
     client = MagicMock()
     client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
         tenant_row
     ]
-    client.table.return_value.insert.return_value.execute.return_value = MagicMock()
     return client
 
 
 def _make_http_response(status_code: int):
-    """Retorna um mock de resposta httpx com o status_code especificado."""
     resp = MagicMock()
     resp.status_code = status_code
     return resp
@@ -51,22 +44,21 @@ def _make_http_response(status_code: int):
 
 @pytest.mark.asyncio
 async def test_send_message_returns_true_on_http_200():
-    """send_message retorna True quando a requisição POST à Evolution API retorna HTTP 200."""
+    """send_message retorna True quando a requisição POST à Meta API retorna HTTP 200."""
     mock_client = _make_supabase_client()
     mock_response = _make_http_response(200)
 
     with (
-        patch.dict(os.environ, _EVO_ENV),
-        patch("services.zapi_client.get_client", return_value=mock_client),
-        patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient,
+        patch.dict(os.environ, _META_ENV),
+        patch("services.meta_client.get_client", return_value=mock_client),
+        patch("services.meta_client.httpx.AsyncClient") as MockAsyncClient,
     ):
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=mock_response)
         MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_http)
         MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        from services.zapi_client import send_message
-
+        from services.meta_client import send_message
         result = await send_message("tenant-uuid-001", "5511999999999", "Olá!")
 
     assert result is True
@@ -85,23 +77,21 @@ async def test_send_message_retries_and_returns_true_on_second_attempt():
     ok_response = _make_http_response(200)
 
     import importlib
-    from services import zapi_client
-    importlib.reload(zapi_client)
+    from services import meta_client
+    importlib.reload(meta_client)
 
     with (
-        patch.dict(os.environ, _EVO_ENV),
-        patch("services.zapi_client.get_client", return_value=mock_client),
-        patch("services.zapi_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient,
+        patch.dict(os.environ, _META_ENV),
+        patch("services.meta_client.get_client", return_value=mock_client),
+        patch("services.meta_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        patch("services.meta_client.httpx.AsyncClient") as MockAsyncClient,
     ):
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(side_effect=[fail_response, ok_response])
         MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_http)
         MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await zapi_client.send_message(
-            "tenant-uuid-001", "5511999999999", "Olá!"
-        )
+        result = await meta_client.send_message("tenant-uuid-001", "5511999999999", "Olá!")
 
     assert result is True
     mock_sleep.assert_called_once_with(1)
@@ -113,28 +103,25 @@ async def test_send_message_retries_and_returns_true_on_second_attempt():
 
 
 async def _run_all_attempts_fail():
-    """Executa send_message com todas as tentativas falhando (HTTP 500); retorna (result, mock_sleep)."""
     import importlib
-    from services import zapi_client
-    importlib.reload(zapi_client)
+    from services import meta_client
+    importlib.reload(meta_client)
 
     mock_client = _make_supabase_client()
     fail_response = _make_http_response(500)
 
     with (
-        patch.dict(os.environ, _EVO_ENV),
-        patch("services.zapi_client.get_client", return_value=mock_client),
-        patch("services.zapi_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        patch("services.zapi_client.httpx.AsyncClient") as MockAsyncClient,
+        patch.dict(os.environ, _META_ENV),
+        patch("services.meta_client.get_client", return_value=mock_client),
+        patch("services.meta_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        patch("services.meta_client.httpx.AsyncClient") as MockAsyncClient,
     ):
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=fail_response)
         MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_http)
         MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await zapi_client.send_message(
-            "tenant-uuid-001", "5511999999999", "Olá!"
-        )
+        result = await meta_client.send_message("tenant-uuid-001", "5511999999999", "Olá!")
         return result, mock_sleep
 
 
@@ -147,20 +134,20 @@ async def test_send_message_returns_false_after_all_attempts_fail():
 
 @pytest.mark.asyncio
 async def test_send_message_sleeps_twice_after_all_attempts_fail():
-    """send_message realiza exatamente 2 sleeps (entre tentativas 1→2 e 2→3) quando todas falham."""
+    """send_message realiza exatamente 2 sleeps quando todas as tentativas falham."""
     _, mock_sleep = await _run_all_attempts_fail()
     assert mock_sleep.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_send_message_first_backoff_is_one_second_after_all_attempts_fail():
+async def test_send_message_first_backoff_is_one_second():
     """send_message aplica backoff de 1s após a 1ª tentativa falhar."""
     _, mock_sleep = await _run_all_attempts_fail()
     mock_sleep.assert_any_call(1)
 
 
 @pytest.mark.asyncio
-async def test_send_message_second_backoff_is_two_seconds_after_all_attempts_fail():
+async def test_send_message_second_backoff_is_two_seconds():
     """send_message aplica backoff de 2s após a 2ª tentativa falhar."""
     _, mock_sleep = await _run_all_attempts_fail()
     mock_sleep.assert_any_call(2)

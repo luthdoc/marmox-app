@@ -1,4 +1,4 @@
-"""Service de processamento de webhooks do Z-API."""
+"""Service de processamento de webhooks da Meta WhatsApp Cloud API."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from db.client import get_client, set_tenant_context
 from db.tenants import get_owner_phone
-from schemas.webhook import ZApiWebhookPayload
+from schemas.webhook import MetaMessage
 from services.agent_dispatch import dispatch_agent
 from services.onboarding_dispatch import dispatch_onboarding_agent
 
@@ -20,14 +20,11 @@ _PHONE_RE = re.compile(r"^\d{10,15}$")
 
 
 def _is_valid_phone(phone: str | None) -> bool:
-    """Retorna True se o phone está no formato numérico Z-API (10–15 dígitos, sem '+')."""
     return phone is not None and bool(_PHONE_RE.match(phone))
 
 
 @dataclass
 class InboundMessage:
-    """Agrupa os dados de uma mensagem inbound para processamento interno."""
-
     tenant_id: str
     tenant_status: str
     tenant_name: str
@@ -37,28 +34,22 @@ class InboundMessage:
     image_url: str | None = None
 
 
-def _validate_token(received_token: str | None, expected_token: str) -> None:
-    """Lança PermissionError se o token for ausente ou inválido."""
-    if not received_token or received_token != expected_token:
-        raise PermissionError("Token Z-API inválido ou ausente")
-
-
-def _resolve_tenant(instance_id: str) -> dict | None:
-    """Busca o tenant pelo instanceId. Retorna row com id/status/name ou None."""
+def _resolve_tenant_by_phone_number_id(phone_number_id: str) -> dict | None:
+    """Busca tenant pelo whatsapp_phone_number_id. Retorna row com id/status/name ou None."""
     client = get_client()
-    tenant_query_result = (
+    result = (
         client.table("tenants")
         .select("id, status, name")
-        .eq("zapi_instance_id", instance_id)
+        .eq("whatsapp_phone_number_id", phone_number_id)
         .execute()
     )
-    if not tenant_query_result.data:
+    if not result.data:
         logger.warning(
-            "Tenant não encontrado para instanceId",
-            extra={"instance_id": instance_id},
+            "Tenant não encontrado para phone_number_id",
+            extra={"phone_number_id": phone_number_id},
         )
         return None
-    return tenant_query_result.data[0]
+    return result.data[0]
 
 
 def _persist_inbound_message(
@@ -83,7 +74,6 @@ def _persist_inbound_message(
 
 
 async def _route_onboarding_message(msg: InboundMessage) -> None:
-    """Valida owner_phone e agenda dispatch de onboarding para o dono."""
     owner_phone = await asyncio.to_thread(get_owner_phone, msg.tenant_id)
     if owner_phone is not None and msg.phone != owner_phone:
         logger.warning(
@@ -95,7 +85,6 @@ async def _route_onboarding_message(msg: InboundMessage) -> None:
 
 
 async def _handle_inbound_message(msg: InboundMessage) -> None:
-    """Loga, persiste mensagem inbound e dispara agente se tenant ativo."""
     if not _is_valid_phone(msg.phone):
         logger.warning("Mensagem descartada — phone inválido", extra={"tenant_id": msg.tenant_id, "phone": msg.phone})
         return
@@ -109,42 +98,29 @@ async def _handle_inbound_message(msg: InboundMessage) -> None:
         await _route_onboarding_message(msg)
 
 
-def _parse_message_content(payload: ZApiWebhookPayload) -> tuple[str, str | None]:
-    """Extrai (text, image_url) do payload Z-API."""
-    if payload.is_image_message:
-        caption = payload.imageMessage.caption if (payload.imageMessage and payload.imageMessage.caption) else ""  # type: ignore[union-attr]
-        return caption, payload.image_url
-    return payload.text.message, None  # type: ignore[union-attr]
+async def process_inbound_message(
+    phone_number_id: str,
+    message: MetaMessage,
+) -> dict:
+    """Processa mensagem da Meta API: resolve tenant por phone_number_id e dispara agente."""
+    if not (message.is_text_message or message.is_image_message):
+        return {"received": True}
 
+    tenant_row = await asyncio.to_thread(_resolve_tenant_by_phone_number_id, phone_number_id)
+    if tenant_row is None:
+        return {"received": True}
 
-def _build_inbound_message(
-    tenant_row: dict, payload: ZApiWebhookPayload, text: str, *, image_url: str | None
-) -> InboundMessage:
-    """Constrói um InboundMessage a partir do tenant_row e payload."""
-    return InboundMessage(
+    text = message.text_body if message.is_text_message else message.image_caption
+    image_url = message.image_url if message.is_image_message else None
+
+    msg = InboundMessage(
         tenant_id=tenant_row["id"],
         tenant_status=tenant_row["status"],
         tenant_name=tenant_row.get("name", ""),
-        phone=payload.phone,  # type: ignore[arg-type]
+        phone=message.phone,
         text=text,
-        instance_id=payload.instanceId,
+        instance_id=phone_number_id,
         image_url=image_url,
     )
-
-
-async def process_inbound_message(
-    payload: ZApiWebhookPayload,
-    received_token: str | None,
-    expected_token: str,
-) -> dict:
-    """Processa webhook Z-API: valida token, resolve tenant e dispara agente."""
-    _validate_token(received_token, expected_token)
-    if not (payload.is_text_message or payload.is_image_message):
-        return {"received": True}
-    tenant_row = await asyncio.to_thread(_resolve_tenant, payload.instanceId)
-    if tenant_row is None:
-        return {"received": True}
-    text, image_url = _parse_message_content(payload)
-    msg = _build_inbound_message(tenant_row, payload, text, image_url=image_url)
     asyncio.create_task(_handle_inbound_message(msg))
     return {"received": True}

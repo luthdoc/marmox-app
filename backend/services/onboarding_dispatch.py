@@ -11,7 +11,7 @@ from db.client import set_tenant_context
 from db.conversation import load_conversation_history, persist_outbound_message
 from db.tenants import complete_onboarding, update_tenant_config
 from services.onboarding_service import parse_empresa_block, process_onboarding_message
-from services.zapi_client import send_message
+from services.meta_client import send_message
 
 logger = logging.getLogger(__name__)
 

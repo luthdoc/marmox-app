@@ -16,7 +16,6 @@ function validateEmail(email: string): boolean {
 
 export function LoginForm() {
   const router = useRouter();
-  const supabase = createClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -48,6 +47,7 @@ export function LoginForm() {
 
     setLoading(true);
 
+    const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     setLoading(false);

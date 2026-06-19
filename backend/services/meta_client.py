@@ -1,9 +1,9 @@
 """
-Envio de mensagens via Evolution API.
+Envio de mensagens via Meta WhatsApp Cloud API.
 
 Responsabilidades:
-- Lookup de evolution_instance_name do tenant (com cache de 30s)
-- Envio de mensagens via POST para o endpoint Evolution API de texto
+- Lookup de whatsapp_phone_number_id do tenant (com cache de 30s)
+- Envio de mensagens via POST para a Graph API da Meta
 - Retry exponencial: até 3 tentativas com backoff 1s, 2s, 4s
 - Logging estruturado para cada tentativa e resultado final
 """
@@ -22,33 +22,23 @@ from db.client import get_client
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Cache de credenciais de tenant (TTL de 30 segundos)
-# ---------------------------------------------------------------------------
-
 _CACHE_TTL_SECONDS = 30
+_META_API_BASE = "https://graph.facebook.com/v21.0"
 
-# Estrutura: { tenant_id: (evolution_instance_name, cached_at_monotonic) }
+# Estrutura: { tenant_id: (whatsapp_phone_number_id, cached_at_monotonic) }
 _tenant_credential_cache: dict[str, tuple[str, float]] = {}
 
 
 class TenantCredentials(TypedDict):
-    evolution_instance_name: str
-
-
-def _parse_tenant_credentials(row: dict) -> str:
-    instance_name = row.get("evolution_instance_name")
-    if not instance_name:
-        raise ValueError("evolution_instance_name ausente no tenant")
-    return instance_name
+    whatsapp_phone_number_id: str
 
 
 def _lookup_cached_credentials(tenant_id: str, now: float) -> TenantCredentials | None:
     cached = _tenant_credential_cache.get(tenant_id)
     if cached is not None:
-        instance_name, cached_at = cached
+        phone_number_id, cached_at = cached
         if now - cached_at < _CACHE_TTL_SECONDS:
-            return {"evolution_instance_name": instance_name}
+            return {"whatsapp_phone_number_id": phone_number_id}
     return None
 
 
@@ -56,29 +46,27 @@ def _fetch_and_cache_credentials(tenant_id: str, now: float) -> TenantCredential
     client = get_client()
     result = (
         client.table("tenants")
-        .select("evolution_instance_name")
+        .select("whatsapp_phone_number_id")
         .eq("id", tenant_id)
         .execute()
     )
     if not result.data:
         return None
-    instance_name = _parse_tenant_credentials(result.data[0])
-    _tenant_credential_cache[tenant_id] = (instance_name, now)
-    return {"evolution_instance_name": instance_name}
+    row = result.data[0]
+    phone_number_id = row.get("whatsapp_phone_number_id")
+    if not phone_number_id:
+        raise ValueError("whatsapp_phone_number_id ausente no tenant")
+    _tenant_credential_cache[tenant_id] = (phone_number_id, now)
+    return {"whatsapp_phone_number_id": phone_number_id}
 
 
 def _get_tenant_credentials(tenant_id: str) -> TenantCredentials | None:
-    """Retorna evolution_instance_name do tenant, usando cache de 30s."""
     now = time.monotonic()
     cached = _lookup_cached_credentials(tenant_id, now)
     if cached is not None:
         return cached
     return _fetch_and_cache_credentials(tenant_id, now)
 
-
-# ---------------------------------------------------------------------------
-# Envio de mensagens
-# ---------------------------------------------------------------------------
 
 _MAX_ATTEMPTS = 3
 
@@ -102,7 +90,7 @@ class SendContext:
 
 def _log_send_success(ctx: SendContext, attempt: int) -> None:
     logger.info(
-        "Mensagem enviada via Evolution API",
+        "Mensagem enviada via Meta WhatsApp API",
         extra={
             "tenant_id": ctx.tenant_id,
             "phone": ctx.phone,
@@ -123,7 +111,7 @@ def _log_send_failure(ctx: SendContext, attempt: int, error: str | None = None) 
     }
     if error is not None:
         extra["error"] = error
-    label = "Evolution API — erro de rede" if error else "Evolution API — resposta não-2xx"
+    label = "Meta API — erro de rede" if error else "Meta API — resposta não-2xx"
     logger.warning(label, extra=extra)
 
 
@@ -156,40 +144,30 @@ async def _retry_send(http_client: httpx.AsyncClient, ctx: SendContext) -> bool:
 
 
 def _build_send_context(credentials: TenantCredentials, msg: OutboundMessage) -> SendContext:
-    instance_name = credentials["evolution_instance_name"]
-    base_url = os.environ.get("EVOLUTION_API_URL", "")
-    api_key = os.environ.get("EVOLUTION_API_KEY", "")
-    url = f"{base_url}/message/sendText/{instance_name}"
+    phone_number_id = credentials["whatsapp_phone_number_id"]
+    access_token = os.environ.get("META_WHATSAPP_ACCESS_TOKEN", "")
+    url = f"{_META_API_BASE}/{phone_number_id}/messages"
     return SendContext(
         url=url,
-        headers={"apikey": api_key},
-        payload={"number": msg.phone, "text": msg.text},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        payload={
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": msg.phone,
+            "type": "text",
+            "text": {"body": msg.text},
+        },
         tenant_id=msg.tenant_id,
         phone=msg.phone,
         text=msg.text,
     )
 
 
-def _log_tenant_not_found(tenant_id: str, phone: str) -> None:
-    logger.error(
-        "Tenant não encontrado para envio de mensagem",
-        extra={"tenant_id": tenant_id, "phone": phone},
-    )
-
-
-def _log_send_exhausted(tenant_id: str, phone: str) -> None:
-    logger.error(
-        "Falha ao enviar mensagem via Evolution API após todas as tentativas",
-        extra={
-            "tenant_id": tenant_id,
-            "phone": phone,
-            "error": f"HTTP não-2xx em {_MAX_ATTEMPTS} tentativas",
-        },
-    )
-
-
 async def send_message(tenant_id: str, phone: str, text: str) -> bool:
-    """Envia mensagem WhatsApp via Evolution API com retry exponencial.
+    """Envia mensagem WhatsApp via Meta Cloud API com retry exponencial.
 
     Args:
         tenant_id: UUID do tenant que envia a mensagem.
@@ -201,7 +179,10 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
     """
     credentials = await asyncio.to_thread(_get_tenant_credentials, tenant_id)
     if credentials is None:
-        _log_tenant_not_found(tenant_id, phone)
+        logger.error(
+            "Tenant não encontrado para envio de mensagem",
+            extra={"tenant_id": tenant_id, "phone": phone},
+        )
         return False
 
     msg = OutboundMessage(tenant_id=tenant_id, phone=phone, text=text)
@@ -211,7 +192,14 @@ async def send_message(tenant_id: str, phone: str, text: str) -> bool:
         success = await _retry_send(http_client, ctx)
 
     if not success:
-        _log_send_exhausted(tenant_id, phone)
+        logger.error(
+            "Falha ao enviar mensagem via Meta API após todas as tentativas",
+            extra={
+                "tenant_id": tenant_id,
+                "phone": phone,
+                "error": f"HTTP não-2xx em {_MAX_ATTEMPTS} tentativas",
+            },
+        )
         return False
 
     return True

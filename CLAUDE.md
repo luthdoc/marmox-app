@@ -32,7 +32,7 @@ uvicorn main:app --reload          # dev server (port 8000)
 uvicorn main:app --host 0.0.0.0    # production
 ```
 
-Key responsibilities: receive Evolution API webhooks, orchestrate Claude (Haiku/Sonnet cascade), persist to Supabase, run follow-up scheduler.
+Key responsibilities: receive Meta WhatsApp Cloud API webhooks, orchestrate Claude (Haiku/Sonnet cascade), persist to Supabase, run follow-up scheduler.
 
 ## Frontend (Next.js)
 
@@ -51,7 +51,7 @@ Dashboard purpose: data management only — lets owners view leads and edit agen
 ### Message Flow
 
 ```
-WhatsApp lead → Evolution API webhook → POST /webhook/whatsapp
+WhatsApp lead → Meta Cloud API webhook → POST /webhook/whatsapp
                                                 ↓
                                       Agent orchestration service
                                           ↓           ↓
@@ -60,7 +60,7 @@ WhatsApp lead → Evolution API webhook → POST /webhook/whatsapp
                                                 ↓
                                            Supabase
                                                 ↓
-                                Evolution API → WhatsApp response
+                                Meta Cloud API → WhatsApp response
 ```
 
 ### Multi-tenancy
@@ -76,12 +76,12 @@ Every database table has a `tenant_id` column. Row Level Security (RLS) is enfor
 
 ### WhatsApp Integration
 
-**Evolution API self-hosted** connects each tenant's WhatsApp number via QR code. Runs on a single VPS — custo fixo independente do número de tenants.
+**Meta WhatsApp Cloud API** — integração oficial via Graph API. Cada tenant precisa de um número verificado no Meta for Developers.
 
-- Cada tenant tem sua própria `instance_name` criada via API no onboarding
-- `instance_name` e `api_key` ficam armazenados na tabela `tenants` no Supabase
-- Webhook configurado por instância aponta para `POST /webhook/whatsapp?tenant_id=<id>`
-- Nunca usar a Meta API oficial no MVP
+- Cada tenant tem seu próprio `whatsapp_phone_number_id` armazenado na tabela `tenants`
+- Webhook único aponta para `POST /webhook/whatsapp?tenant_id=<id>`; verificação via `META_WHATSAPP_VERIFY_TOKEN`
+- Envio via `POST /{phone_number_id}/messages` autenticado com `META_WHATSAPP_ACCESS_TOKEN`
+- Retry exponencial: até 3 tentativas com backoff 1s/2s
 
 ### Follow-up Scheduler
 
@@ -101,14 +101,14 @@ Leads in status `qualified`, `scheduled`, `handoff`, or `cold` are excluded from
 
 ## Environment Variables
 
-See `.env.example` (to be created in `backend/`). Required:
+See `backend/.env.example`. Required:
 
 ```
 SUPABASE_URL
 SUPABASE_SERVICE_KEY
 ANTHROPIC_API_KEY
-EVOLUTION_API_URL        # ex: https://evo.seudominio.com
-EVOLUTION_API_KEY        # global API key do servidor Evolution
+META_WHATSAPP_ACCESS_TOKEN   # System User token do Meta for Developers
+META_WHATSAPP_VERIFY_TOKEN   # String arbitrária definida no painel Meta
 ```
 
 ## Design System
